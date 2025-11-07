@@ -19,7 +19,7 @@ return array (
   ),
   '系' => 
   array (
-    0 => 'xi ji',
+    0 => 'xi',
   ),
   '统' => 
   array (
@@ -31,7 +31,7 @@ return array (
   ),
   '术' => 
   array (
-    0 => 'shu zhu',
+    0 => 'shu',
   ),
   '栈' => 
   array (
@@ -64,5 +64,9 @@ return array (
   '李' => 
   array (
     0 => 'li',
+  ),
+  '开' => 
+  array (
+    0 => 'kai',
   ),
 );
