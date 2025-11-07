@@ -3,75 +3,223 @@
 
 require __DIR__ . '/../vendor/autoload.php';
 
-use tekintian\pinyin\Pinyin;
+use tekintian\pinyin\PinyinConverter;
 
-$methods = ['sentence','fullSentence','name','passportName','phrase','permalink','heteronym','heteronymAsList','chars','abbr','nameAbbr'];
-$method = 'sentence';
-$inputOptions = [];
-$methodAsString = implode('/', $methods);
+// 命令行选项定义
+$options = [
+    'separator' => ' ',           // 分隔符
+    'with-tone' => false,         // 是否带声调
+    'mode' => 'delete',           // 特殊字符处理模式: delete/keep/replace
+    'slug' => false,              // 是否生成URL Slug
+    'json' => false,              // 是否输出JSON格式
+    'compact' => false,           // 是否压缩JSON输出
+    'add-custom' => null,         // 添加自定义拼音: 汉字:拼音
+    'remove-custom' => null,      // 删除自定义拼音: 汉字
+    'merge-self-learn' => false,  // 执行自学习字典合并
+    'help' => false               // 显示帮助
+];
 
 $help = <<<"HELP"
-Usage:
-    ./pinyin [chinese] [method] [options]
-Options:
-    -j, --json               输出 JSON 格式.
-    -c, --compact            不格式化输出 JSON.
-    -m, --method=[method]    转换方式，可选：{$methodAsString}.
-    --no-tone                不使用音调.
-    --tone-style=[style]     音调风格，可选值：symbol/none/number, default: none.
-    -h, --help               显示帮助.
+汉字转拼音命令行工具 (基于 PinyinConverter)
+
+用法:
+    ./pinyin "文本内容" [选项]
+
+基本转换:
+    ./pinyin "你好世界"                    # 无声调转换
+    ./pinyin "你好世界" --with-tone         # 带声调转换
+    ./pinyin "你好世界" -s "-"              # 使用连字符分隔
+    ./pinyin "你好世界" --slug              # 生成URL Slug
+
+特殊字符处理:
+    ./pinyin "你好！世界"                   # 默认删除特殊字符
+    ./pinyin "你好！世界" --mode keep       # 保留特殊字符
+    ./pinyin "你好！世界" --mode replace    # 替换特殊字符
+
+自定义字典管理:
+    ./pinyin --add-custom="好:hao"          # 添加自定义拼音（无声调）
+    ./pinyin --add-custom="好:hǎo" --with-tone # 添加带声调自定义拼音
+    ./pinyin --remove-custom="好"           # 删除自定义拼音
+
+自学习功能:
+    ./pinyin --merge-self-learn            # 执行自学习字典合并
+
+输出格式:
+    ./pinyin "你好世界" --json              # JSON格式输出
+    ./pinyin "你好世界" --json --compact    # 压缩JSON输出
+
+选项说明:
+    -s, --separator=SEP        分隔符 (默认: 空格)
+    -t, --with-tone            带声调转换
+    -m, --mode=MODE            特殊字符处理模式: delete/keep/replace (默认: delete)
+    -u, --slug                 生成URL Slug
+    -j, --json                 JSON格式输出
+    -c, --compact              压缩JSON输出
+    -a, --add-custom=CHAR:PY   添加自定义拼音
+    -r, --remove-custom=CHAR   删除自定义拼音
+    --merge-self-learn         执行自学习字典合并
+    -h, --help                显示此帮助信息
+
+示例:
+    ./pinyin "Vue3开发企业级AI服务" --with-tone
+    ./pinyin "云南省昆明市" --slug
+    ./pinyin "你好！@#世界" --mode keep
+    ./pinyin --add-custom="系:xi" --add-custom="术:shu"
 HELP;
 
-function has_option($option, $alias = null): bool
-{
-    global $inputOptions;
-
-    if ($alias) {
-        return array_key_exists($option, $inputOptions) || array_key_exists($alias, $inputOptions);
+// 解析命令行参数
+function parseArguments($argv) {
+    global $options;
+    
+    $inputText = '';
+    $args = [];
+    
+    for ($i = 1; $i < count($argv); $i++) {
+        $arg = $argv[$i];
+        
+        if (strpos($arg, '--') === 0) {
+            // 长选项
+            $parts = explode('=', substr($arg, 2), 2);
+            $key = $parts[0];
+            $value = $parts[1] ?? true;
+            
+            if (isset($options[$key])) {
+                $options[$key] = $value;
+            }
+        } elseif (strpos($arg, '-') === 0) {
+            // 短选项
+            $key = substr($arg, 1);
+            if (strlen($key) > 1 && strpos($key, '=') !== false) {
+                $parts = explode('=', $key, 2);
+                $key = $parts[0];
+                $value = $parts[1];
+            } else {
+                $value = true;
+            }
+            
+            // 映射短选项到长选项
+            $mapping = [
+                's' => 'separator',
+                't' => 'with-tone',
+                'm' => 'mode',
+                'u' => 'slug',
+                'j' => 'json',
+                'c' => 'compact',
+                'a' => 'add-custom',
+                'r' => 'remove-custom',
+                'h' => 'help'
+            ];
+            
+            if (isset($mapping[$key])) {
+                $options[$mapping[$key]] = $value;
+            }
+        } else {
+            // 输入文本
+            if (empty($inputText)) {
+                $inputText = $arg;
+            } else {
+                $inputText .= ' ' . $arg;
+            }
+        }
     }
-
-    return array_key_exists($option, $inputOptions);
+    
+    return $inputText;
 }
 
-function get_option($option, $default = null, $alias = null): ?string
-{
-    global $inputOptions;
-
-    if ($alias) {
-        return $inputOptions[$option] ?? $inputOptions[$alias] ?? $default;
+// 主程序
+function main($argv) {
+    global $options, $help;
+    
+    $inputText = parseArguments($argv);
+    
+    // 显示帮助
+    if ($options['help'] || (empty($inputText) && !$options['add-custom'] && !$options['remove-custom'] && !$options['merge-self-learn'])) {
+        echo $help;
+        exit(0);
     }
-
-    return $inputOptions[$option] ?? $default;
-}
-
-$inputOptions = parse_options($argv);
-$input = $inputOptions[0] ?? null;
-
-if (empty($input) || has_option('help', 'h')) {
-    echo $help;
-    exit(0);
-}
-
-$method = get_option('method', $method, 'm');
-$toneStyle = has_option('no-tone') ? 'none' : get_option('tone-style', 'none');
-
-if (! in_array($method, $methods)) {
-    echo "Method '{$method}' is not supported.\n";
-    exit(1);
-}
-
-$result = Pinyin::$method($input, $method === 'permalink' ? '-' : $toneStyle);
-
-$toJson = has_option('json', 'j') || in_array($method, ['heteronym', 'heteronymAsList']);
-
-if ($toJson) {
-    $options = JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT;
-
-    if (has_option('compact', 'c')) {
-        $options = 0;
+    
+    // 创建转换器实例
+    $converter = new PinyinConverter();
+    
+    // 处理自定义字典操作
+    if ($options['add-custom']) {
+        $parts = explode(':', $options['add-custom'], 2);
+        if (count($parts) === 2) {
+            $char = trim($parts[0]);
+            $pinyin = trim($parts[1]);
+            $converter->addCustomPinyin($char, $pinyin, $options['with-tone']);
+            echo "✅ 已添加自定义拼音: {$char} → {$pinyin}\n";
+        } else {
+            echo "❌ 无效的自定义拼音格式，请使用 汉字:拼音 格式\n";
+            exit(1);
+        }
+        exit(0);
     }
-
-    $result = json_encode($result, $options);
+    
+    if ($options['remove-custom']) {
+        $char = trim($options['remove-custom']);
+        $converter->removeCustomPinyin($char, $options['with-tone']);
+        echo "✅ 已删除自定义拼音: {$char}\n";
+        exit(0);
+    }
+    
+    // 处理自学习字典合并
+    if ($options['merge-self-learn']) {
+        $result = $converter->executeMerge();
+        echo "📊 自学习字典合并完成:\n";
+        echo "   成功合并: " . implode(', ', $result['success']) . "\n";
+        if (!empty($result['fail'])) {
+            echo "   失败项目: " . count($result['fail']) . "\n";
+            foreach ($result['fail'] as $fail) {
+                echo "     - {$fail['toneType']}: {$fail['error']}\n";
+            }
+        }
+        exit(0);
+    }
+    
+    // 执行拼音转换
+    if (!empty($inputText)) {
+        if ($options['slug']) {
+            // URL Slug 模式
+            $result = $converter->getUrlSlug($inputText, $options['separator']);
+        } else {
+            // 普通转换模式
+            $specialCharParam = $options['mode'] === 'replace' 
+                ? ['mode' => 'replace', 'map' => []] 
+                : $options['mode'];
+            
+            $result = $converter->convert(
+                $inputText,
+                $options['separator'],
+                $options['with-tone'],
+                $specialCharParam
+            );
+        }
+        
+        // 输出结果
+        if ($options['json']) {
+            $jsonOptions = JSON_UNESCAPED_UNICODE;
+            if (!$options['compact']) {
+                $jsonOptions |= JSON_PRETTY_PRINT;
+            }
+            
+            $output = [
+                'input' => $inputText,
+                'output' => $result,
+                'options' => [
+                    'separator' => $options['separator'],
+                    'with_tone' => $options['with-tone'],
+                    'mode' => $options['mode'],
+                    'is_slug' => $options['slug']
+                ]
+            ];
+            
+            echo json_encode($output, $jsonOptions) . "\n";
+        } else {
+            echo $result . "\n";
+        }
+    }
 }
 
-echo $result, "\n";
+// 执行主程序
+main($argv);
