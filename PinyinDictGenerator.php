@@ -224,12 +224,19 @@ class PinyinDictGenerator {
     private function generateRareDicts($rareEntries) {
         $withTone = [];
         $noTone = [];
-        foreach ($rareEntries as $pinyin) {
+        foreach ($rareEntries as $index => $pinyin) {
             $pinyin = trim($pinyin);
+            if (empty($pinyin)) continue;
+            // 计算对应的汉字字符
+            $charIndex = $index + $this->commonCount + 19968;
+            $char = mb_chr($charIndex, 'UTF-8');
+            if (!$char) continue;
+            // 去重
             $uniqueWithTone = $this->uniquePinyin($pinyin);
-            $withTone[] = $uniqueWithTone;
+            $withTone[$char] = $uniqueWithTone;
+            // 去声调+去重
             $noToneRaw = $this->removeTone($uniqueWithTone);
-            $noTone[] = $this->uniquePinyin($noToneRaw);
+            $noTone[$char] = $this->uniquePinyin($noToneRaw);
         }
         $this->writeDict('rare_with_tone.php', $withTone, '带声调生僻字');
         $this->writeDict('rare_no_tone.php', $noTone, '不带声调生僻字');
@@ -275,22 +282,17 @@ class PinyinDictGenerator {
 
         foreach ($critical as $char => $expected) {
             $actual = '';
-            $charCode = mb_ord($char, 'UTF-8');
-            $globalIndex = $charCode - 19968;
 
             // 优先查常用字
             if (isset($noToneCommon[$char])) {
                 $actual = $noToneCommon[$char];
             }
             // 再查生僻字
-            else {
-                $rareIndex = $globalIndex - $this->commonCount;
-                if ($rareIndex >= 0 && isset($noToneRare[$rareIndex]) && !empty($noToneRare[$rareIndex])) {
-                    $actual = $noToneRare[$rareIndex];
-                } else {
-                    $errors[] = "缺失汉字：{$char}";
-                    continue;
-                }
+            elseif (isset($noToneRare[$char])) {
+                $actual = $noToneRare[$char];
+            } else {
+                $errors[] = "缺失汉字：{$char}";
+                continue;
             }
 
             // 取第一个读音对比（对齐JS的默认行为）
