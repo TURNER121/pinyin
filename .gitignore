@@ -2,3 +2,4 @@
 !.gitkeep
 #src
 vendor/
+/tests/pinyin_test_dict
