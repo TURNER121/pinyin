@@ -168,9 +168,6 @@ return [
     '人工智能' => [
         'ren gong zhi neng',
     ],
-    '机器学习' => [
-        'ji qi xue xi',
-    ],
     '深度学习' => [
         'shen du xue xi',
     ],

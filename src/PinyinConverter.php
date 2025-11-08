@@ -328,7 +328,7 @@ class PinyinConverter {
      * 获取指定声调类型的上次合并时间
      * @param string $toneType 声调类型
      * @return int 时间戳
-     */
+*/
     private function getLastMergeTimeFile($toneType) {
         $path = $this->config['dict']['backup'] . "/last_merge_{$toneType}.txt";
         return file_exists($path) ? (int)file_get_contents($path) : 0;
@@ -411,7 +411,7 @@ class PinyinConverter {
                 $this->cleanupAfterMerge($toneType, $mergeCount);
                 $this->updateLastMergeTime($toneType);
                 $result['success'][] = $toneType;
-            } catch (Exception $e) {
+            } catch (\Exception $e) {
                 $result['fail'][] = [
                     'toneType' => $toneType,
                     'error' => $e->getMessage()
@@ -438,7 +438,7 @@ class PinyinConverter {
         $sortedChars = $this->sortSelfLearnByFrequency($selfLearnData, $toneType);
 
         $mergedChars = [];
-        foreach ($sortedChars as $char) {
+foreach ($sortedChars as $char) {
             if (count($mergedChars) >= $mergeCount) {
                 break;
             }
@@ -618,18 +618,18 @@ class PinyinConverter {
      */
     private function getCharPinyin($char, $withTone, $context = [], $tempMap = []) {
         $type = $withTone ? 'with_tone' : 'no_tone';
-
+    
         // 数字/字母直接返回
         if (ctype_alnum($char)) {
             return $char;
         }
-
+    
         // 临时映射（单字处理）
         if (isset($tempMap[$char])) {
             $pinyin = $withTone ? $tempMap[$char] : $this->removeTone($tempMap[$char]);
             return preg_replace('/\s+/', '', $pinyin);
         }
-
+    
         // 自定义字典（区分单字/多字）
         if (isset($this->dicts['custom'][$type][$char])) {
             $pinyin = $this->getFirstPinyin($this->dicts['custom'][$type][$char]);
@@ -637,13 +637,18 @@ class PinyinConverter {
                 ? preg_replace('/\s+/', '', $pinyin)
                 : $pinyin;
         }
-
+    
         // 其他字典（单字处理）
         $pinyinArray = $this->getAllPinyinOptions($char, $withTone);
         $pinyin = count($pinyinArray) <= 1 
             ? $this->getFirstPinyin($pinyinArray)
             : ($this->matchPolyphoneRule($char, $pinyinArray, $context, $withTone) ?? $pinyinArray[0]);
-
+    
+        // 修复：根据withTone参数决定是否去除声调
+        if (!$withTone && preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
+            $pinyin = $this->removeTone($pinyin);
+        }
+        
         return preg_replace('/\s+/', '', $pinyin);
     }
 
@@ -728,20 +733,26 @@ class PinyinConverter {
         if (empty($rules)) {
             return null;
         }
-
+    
         $prevChar = $context['prev'] ?? '';
         $nextChar = $context['next'] ?? '';
         $word = $context['word'] ?? '';
-
+    
         foreach ($rules as $rule) {
             $ruleType = $rule['type'] ?? '';
             $target = $rule['char'] ?? $rule['word'] ?? '';
             $rulePinyin = $rule['pinyin'] ?? '';
-
-            if (empty($rulePinyin) || !in_array($rulePinyin, $pinyinArray)) {
+    
+            if (empty($rulePinyin)) {
                 continue;
             }
-
+            
+            // 修复：当不需要声调时，先移除规则拼音中的声调再进行匹配
+            $checkPinyin = $withTone ? $rulePinyin : $this->removeTone($rulePinyin);
+            if (!in_array($checkPinyin, $pinyinArray)) {
+                continue;
+            }
+    
             if ($ruleType === 'word' && $word === $target) {
                 return $rulePinyin;
             }
@@ -752,7 +763,7 @@ class PinyinConverter {
                 return $rulePinyin;
             }
         }
-
+    
         return null;
     }
 
