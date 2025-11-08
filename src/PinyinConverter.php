@@ -661,32 +661,37 @@ $data = file_exists($path) ? require $path : [];
     private function getAllPinyinOptions($char, $withTone) {
         $type = $withTone ? 'with_tone' : 'no_tone';
 
-        if (isset($this->dicts['self_learn'][$type][$char])) {
-            $pinyin = $this->dicts['self_learn'][$type][$char];
-            return $this->parsePinyinOptions($pinyin);
-        }
-
-        $this->loadCommonDict($withTone);
-        if (isset($this->dicts['common'][$type][$char])) {
-            $pinyin = $this->dicts['common'][$type][$char];
-            return $this->parsePinyinOptions($pinyin);
-        }
-
+        // 1. 自定义字典（最高优先级）
         $this->loadCustomDict($withTone);
         if (isset($this->dicts['custom'][$type][$char])) {
             $pinyin = $this->dicts['custom'][$type][$char];
             return $this->parsePinyinOptions($pinyin);
         }
 
+        // 2. 基础映射表
+        if (isset($this->basicPinyinMap[$char])) {
+            return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
+        }
+
+        // 3. 自学习字典
+        if (isset($this->dicts['self_learn'][$type][$char])) {
+            $pinyin = $this->dicts['self_learn'][$type][$char];
+            return $this->parsePinyinOptions($pinyin);
+        }
+
+        // 4. 常用字典
+        $this->loadCommonDict($withTone);
+        if (isset($this->dicts['common'][$type][$char])) {
+            $pinyin = $this->dicts['common'][$type][$char];
+            return $this->parsePinyinOptions($pinyin);
+        }
+
+        // 5. 生僻字字典（并自动增加到自学习字典）
         $this->loadRareDict($withTone);
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             $this->learnChar($char, $rawPinyin, $withTone);
             return $this->parsePinyinOptions($rawPinyin);
-        }
-
-        if (isset($this->basicPinyinMap[$char])) {
-            return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
         }
 
         return [$char];
