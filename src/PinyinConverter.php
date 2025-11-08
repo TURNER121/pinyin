@@ -557,8 +557,9 @@ class PinyinConverter {
             
             $pinyinArr = array_map(function($item) use ($wordLen) {
                 $trimmed = trim($item);
+                // 对于单字，保留空格分隔的多音字拼音
                 if ($wordLen === 1) {
-                    return preg_replace('/\s+/', '', $trimmed);
+                    return preg_replace('/\s+/', ' ', $trimmed);
                 } else {
                     return preg_replace('/\s+/', ' ', $trimmed);
                 }
@@ -656,24 +657,27 @@ class PinyinConverter {
         $type = $withTone ? 'with_tone' : 'no_tone';
 
         if (isset($this->dicts['self_learn'][$type][$char])) {
-            return $this->dicts['self_learn'][$type][$char];
+            $pinyin = $this->dicts['self_learn'][$type][$char];
+            return $this->parsePinyinOptions($pinyin);
         }
 
         $this->loadCommonDict($withTone);
         if (isset($this->dicts['common'][$type][$char])) {
-            return $this->dicts['common'][$type][$char];
+            $pinyin = $this->dicts['common'][$type][$char];
+            return $this->parsePinyinOptions($pinyin);
         }
 
         $this->loadCustomDict($withTone);
         if (isset($this->dicts['custom'][$type][$char])) {
-            return $this->dicts['custom'][$type][$char];
+            $pinyin = $this->dicts['custom'][$type][$char];
+            return $this->parsePinyinOptions($pinyin);
         }
 
         $this->loadRareDict($withTone);
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             $this->learnChar($char, $rawPinyin, $withTone);
-            return $rawPinyin;
+            return $this->parsePinyinOptions($rawPinyin);
         }
 
         if (isset($this->basicPinyinMap[$char])) {
@@ -681,6 +685,34 @@ class PinyinConverter {
         }
 
         return [$char];
+    }
+
+    /**
+     * 解析拼音选项
+     * @param mixed $pinyin 拼音数据
+     * @return array 拼音选项数组
+     */
+    private function parsePinyinOptions($pinyin) {
+        if (is_array($pinyin)) {
+            // 如果已经是数组，处理每个元素
+            $result = [];
+            foreach ($pinyin as $item) {
+                if (is_string($item) && str_contains($item, ' ')) {
+                    // 如果数组元素包含空格分隔的拼音，拆分它们
+                    $result = array_merge($result, explode(' ', $item));
+                } else {
+                    $result[] = $item;
+                }
+            }
+            return array_unique(array_filter($result));
+        }
+        
+        if (is_string($pinyin)) {
+            // 如果是字符串，按空格拆分
+            return array_unique(array_filter(explode(' ', $pinyin)));
+        }
+        
+        return [$pinyin];
     }
 
     /**

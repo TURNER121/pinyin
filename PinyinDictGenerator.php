@@ -186,6 +186,26 @@ class PinyinDictGenerator {
     }
 
     /**
+     * 处理多音字拼音：确保多音字拼音正确分隔
+     */
+    private function processPolyphonePinyin($pinyin) {
+        // 如果拼音包含多个读音但没有空格分隔，尝试智能分隔
+        $pinyin = trim($pinyin);
+        if (empty($pinyin)) return '';
+        
+        // 检查是否包含多个读音但没有空格分隔
+        if (!str_contains($pinyin, ' ') && preg_match_all('/[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+/iu', $pinyin, $matches)) {
+            $pinyins = $matches[0];
+            if (count($pinyins) > 1) {
+                // 多个读音但没有空格分隔，手动添加空格
+                return implode(' ', $pinyins);
+            }
+        }
+        
+        return $pinyin;
+    }
+
+    /**
      * 拆分常用字/生僻字：仅按索引拆分，无特殊处理
      */
     private function splitCommonAndRare($validEntries) {
@@ -206,8 +226,12 @@ class PinyinDictGenerator {
             if (empty($pinyin)) continue;
             $char = mb_chr($index + 19968, 'UTF-8');
             if (!$char) continue;
+            
+            // 处理多音字拼音分隔
+            $processedPinyin = $this->processPolyphonePinyin($pinyin);
+            
             // 去重
-            $uniqueWithTone = $this->uniquePinyin($pinyin);
+            $uniqueWithTone = $this->uniquePinyin($processedPinyin);
             $withTone[$char] = $uniqueWithTone;
             // 去声调+去重
             $noToneRaw = $this->removeTone($uniqueWithTone);

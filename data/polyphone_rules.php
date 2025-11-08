@@ -21,6 +21,7 @@ return [
         ['type' => 'post', 'char' => '为', 'pinyin' => 'xíng'], // 行为
         ['type' => 'post', 'char' => '动', 'pinyin' => 'xíng'], // 行动
         ['type' => 'post', 'char' => '走', 'pinyin' => 'xíng'], // 行走
+        ['type' => 'post', 'char' => '者', 'pinyin' => 'xíng'],  // 行者
         ['type' => 'pre', 'char' => '银', 'pinyin' => 'háng'],  // 银行
         ['type' => 'post', 'char' => '业', 'pinyin' => 'háng'],  // 行业
         ['type' => 'post', 'char' => '列', 'pinyin' => 'háng'],  // 行列

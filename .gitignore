@@ -3,3 +3,4 @@
 #src
 vendor/
 /tests/pinyin_test_dict
+pinyin.sublime-project
