@@ -89,10 +89,22 @@ function parseArguments($argv) {
         } elseif (strpos($arg, '-') === 0) {
             // 短选项
             $key = substr($arg, 1);
+            
+            // 检查是否为带值的短选项（-s=value形式）
             if (strlen($key) > 1 && strpos($key, '=') !== false) {
                 $parts = explode('=', $key, 2);
                 $key = $parts[0];
                 $value = $parts[1];
+            } 
+            // 检查是否为需要值的短选项（-s value形式）
+            elseif (in_array($key, ['s', 'm', 'a', 'r'])) {
+                // 修复：如果下一个参数存在，就直接使用它，无论它是否以'-'开头
+                if ($i + 1 < count($argv)) {
+                    $value = $argv[$i + 1];
+                    $i++;
+                } else {
+                    $value = true;
+                }
             } else {
                 $value = true;
             }
@@ -181,7 +193,9 @@ function main($argv) {
     if (!empty($inputText)) {
         if ($options['slug']) {
             // URL Slug 模式
-            $result = $converter->getUrlSlug($inputText, $options['separator']);
+            // 修复：确保正确处理分隔符参数，并且忽略with-tone参数
+            $slugSeparator = $options['separator'] !== ' ' ? $options['separator'] : '-';
+            $result = $converter->getUrlSlug($inputText, $slugSeparator);
         } else {
             // 普通转换模式
             $specialCharParam = $options['mode'] === 'replace' 
