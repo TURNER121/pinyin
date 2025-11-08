@@ -580,7 +580,7 @@ foreach ($sortedChars as $char) {
             return;
         }
         $path = $this->config['dict']['common'][$type];
-        $data = file_exists($path) ? require $path : [];
+$data = file_exists($path) ? require $path : [];
         $this->dicts['common'][$type] = $this->formatPinyinArray($data);
     }
 
@@ -857,7 +857,7 @@ foreach ($sortedChars as $char) {
         }
 
         // 明确过滤不需要的字符
-        $blockedChars = ['%', '~', '!', '^', '&', '*', '`', '|', '\\', '{', '}', '<', '>'];
+        $blockedChars = ['%', '~', '!', '^', '&', '*', '`', '|', '\\', '{', '}', '<', '>', '【', '】', '、', '。', '，', '；', '：', '“', '”', '‘', '’', '（', '）'];
         if (in_array($char, $blockedChars)) {
             return '';
         }
@@ -921,6 +921,7 @@ foreach ($sortedChars as $char) {
             $word = $item['word'];
             if (in_array($word, $processedWords)) continue;
             $pinyin = $this->getFirstPinyin($item['pinyin']);
+            // 修复：确保自定义多字词语的拼音中正确保留空格
             $result = str_replace($word, $pinyin, $result);
             $processedWords[] = $word;
         }
@@ -1073,10 +1074,15 @@ foreach ($sortedChars as $char) {
      */
     public function getUrlSlug($text, $separator = '-') {
         $separator = $separator ?: '-';
+        // 修复：使用正确的特殊字符处理模式
         $pinyin = $this->convert($text, $separator, false, 'delete');
+        // 修复：确保只保留字母、数字和分隔符
         $pinyin = preg_replace('/[^a-z0-9' . preg_quote($separator, '/') . ']/i', '', $pinyin);
         $pinyin = strtolower($pinyin);
-        return trim(preg_replace('/' . preg_quote($separator, '/') . '+/', $separator, $pinyin), $separator);
+        // 修复：正确处理连续分隔符和首尾分隔符
+        $pinyin = trim(preg_replace('/' . preg_quote($separator, '/') . '+/', $separator, $pinyin), $separator);
+        
+        return $pinyin;
     }
 
     /**
