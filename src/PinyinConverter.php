@@ -928,39 +928,83 @@ if (is_string($pinyin)) {
             return mb_strlen($b['word']) - mb_strlen($a['word']);
         });
 
+        // 构建所有自定义词语的正则模式
+        $wordPatterns = [];
         foreach ($this->customMultiWords[$type] as $item) {
             $word = $item['word'];
             if (in_array($word, $processedWords)) continue;
             
-            // 检查文本中是否包含该词语
             if (strpos($result, $word) !== false) {
                 $pinyin = $this->getFirstPinyin($item['pinyin']);
-                // 将拼音中的空格替换为实际分隔符
                 $processedPinyin = str_replace(' ', $separator, $pinyin);
-                // 使用特殊标记来保护拼音字符串不被后续处理拆分
                 $protectedPinyin = "[[CUSTOM_PINYIN:{$processedPinyin}]]";
                 
-                // 使用正则表达式进行替换
-                // 先处理词语前接非中文字符的情况
-                $result = preg_replace(
-                    '/([^\p{Han}])(' . preg_quote($word, '/') . ')/u',
-                    '$1' . $separator . $protectedPinyin,
-                    $result
-                );
-                
-                // 再处理词语后接非中文字符的情况
-                $result = preg_replace(
-                    '/(' . preg_quote($word, '/') . ')([^\p{Han}])/u',
-                    $protectedPinyin . $separator . '$2', // 直接使用实际分隔符
-                    $result
-                );
-                
-                // 再处理词语出现在文本末尾的情况
-                $result = str_replace($word, $protectedPinyin, $result);
-                
+                $wordPatterns[] = [
+                    'word' => $word,
+                    'pattern' => preg_quote($word, '/'),
+                    'pinyin' => $protectedPinyin
+                ];
                 $processedWords[] = $word;
             }
         }
+
+        if (empty($wordPatterns)) {
+            return [$result, $processedWords];
+        }
+
+        // 一次性匹配所有自定义词语及其上下文
+        $pattern = '/(';
+        foreach ($wordPatterns as $item) {
+            $pattern .= $item['pattern'] . '|';
+        }
+        $pattern = rtrim($pattern, '|') . ')/u';
+
+        // 使用回调函数进行替换，处理各种上下文情况
+        $result = preg_replace_callback($pattern, function($matches) use ($wordPatterns, $separator, $result) {
+            $matchedWord = $matches[0];
+            
+            // 找到对应的拼音
+            $pinyin = '';
+            foreach ($wordPatterns as $item) {
+                if ($item['word'] === $matchedWord) {
+                    $pinyin = $item['pinyin'];
+                    break;
+                }
+            }
+            
+            if ($pinyin === '') {
+                return $matchedWord;
+            }
+
+            // 获取匹配前后的字符
+            $matchPos = strpos($result, $matchedWord);
+            if ($matchPos === false) {
+                return $pinyin;
+            }
+            
+            $before = substr($result, 0, $matchPos);
+            $after = substr($result, $matchPos + mb_strlen($matchedWord));
+            
+            $prevChar = $before !== '' ? mb_substr($before, -1) : '';
+            $nextChar = $after !== '' ? mb_substr($after, 0, 1) : '';
+            
+            $isPrevHan = $prevChar && preg_match('/\p{Han}/u', $prevChar);
+            $isNextHan = $nextChar && preg_match('/\p{Han}/u', $nextChar);
+            
+            // 根据上下文决定是否添加分隔符
+            $prefix = '';
+            $suffix = '';
+            
+            if (!$isPrevHan && $prevChar !== '') {
+                $prefix = $separator;
+            }
+            
+            if (!$isNextHan && $nextChar !== '') {
+                $suffix = $separator;
+            }
+            
+            return $prefix . $pinyin . $suffix;
+        }, $result);
 
         return [$result, $processedWords];
     }
