@@ -93,9 +93,9 @@ class PinyinConverter implements ConverterInterface {
 
     /**
      * 高频转换结果缓存
-     * @var \SplObjectStorage
+     * @var array
      */
-    private $cache;
+    private $cache = [];
 
     /**
      * 特殊字符最终替换映射
@@ -150,7 +150,7 @@ class PinyinConverter implements ConverterInterface {
      */
     public function __construct($options = []) {
         $this->config = array_replace_recursive($this->config, $options);
-        $this->cache = new \SplObjectStorage();
+        $this->cache = [];
         $this->finalCharMap = $this->config['special_char']['default_map'];
         
         if (isset($options['special_char']['custom_map']) && is_array($options['special_char']['custom_map'])) {
@@ -173,7 +173,7 @@ class PinyinConverter implements ConverterInterface {
             FileUtil::createDir($backupDir);
         }
 
-        foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
+foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             foreach (['with_tone', 'no_tone'] as $toneType) {
                 $path = $this->config['dict'][$dictType][$toneType];
                 if (!FileUtil::fileExists($path)) {
@@ -246,6 +246,19 @@ class PinyinConverter implements ConverterInterface {
     }
 
     /**
+     * 处理字符串中的空格
+     * @param string $text 要处理的文本
+     * @param bool $removeAllSpaces 是否完全删除空格
+     * @return string 处理后的文本
+     */
+    private function processSpaces($text, $removeAllSpaces = false) {
+        if ($removeAllSpaces) {
+            return preg_replace('/\s+/', '', $text);
+        }
+        return preg_replace('/\s+/', ' ', $text);
+    }
+
+    /**
      * 动态添加自定义拼音（区分单字/多字空格处理）
      * @param string $char 汉字/词语
      * @param array|string $pinyin 拼音
@@ -259,11 +272,7 @@ class PinyinConverter implements ConverterInterface {
         $pinyinArray = is_array($pinyin) ? $pinyin : [$pinyin];
         $pinyinArray = array_map(function($item) use ($wordLen) {
             $clean = preg_replace('/[^\p{L}\p{M} ]/u', '', $item);
-            if ($wordLen === 1) {
-                return trim(preg_replace('/\s+/', '', $clean));
-            } else {
-                return trim(preg_replace('/\s+/', ' ', $clean));
-            }
+            return trim($this->processSpaces($clean, $wordLen === 1));
         }, $pinyinArray);
 
         $pinyinArray = array_filter($pinyinArray);
@@ -335,7 +344,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function getLastMergeTimeFile($toneType) {
         $path = $this->config['dict']['backup'] . "/last_merge_{$toneType}.txt";
-        return FileUtil::fileExists($path) ? (int)FileUtil::getFileContent($path) : 0;
+        return FileUtil::fileExists($path) ? (int)FileUtil::readFile($path) : 0;
     }
 
     /**
@@ -562,12 +571,7 @@ class PinyinConverter implements ConverterInterface {
             $pinyinArr = array_map(function($item) use ($wordLen) {
                 $trimmed = trim($item);
                 // 对于单字，完全去除空格
-                if ($wordLen === 1) {
-                    return preg_replace('/\s+/', '', $trimmed);
-                } else {
-                    // 对于多字词语，规范化空格
-                    return preg_replace('/\s+/', ' ', $trimmed);
-                }
+                return $this->processSpaces($trimmed, $wordLen === 1);
             }, $pinyinArr);
             
             $formatted[$char] = array_filter($pinyinArr) ?: [$char];
@@ -585,8 +589,18 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['common'][$type];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
-        $this->dicts['common'][$type] = $this->formatPinyinArray($data);
+        $rawData = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $commonData = [];
+        foreach ($rawData as $key => $value) {
+            if (is_string($key)) {
+                $commonData[$key] = is_array($value) ? $value : [$value];
+            } elseif (is_numeric($key) && is_array($value) && count($value) >= 2) {
+                $char = $value[0];
+                $pinyin = $value[1];
+                $commonData[$char] = is_array($pinyin) ? $pinyin : [$pinyin];
+            }
+        }
+        $this->dicts['common'][$type] = $this->formatPinyinArray($commonData);
     }
 
     /**
@@ -621,43 +635,73 @@ class PinyinConverter implements ConverterInterface {
      * @param array $tempMap 临时映射
      * @return string 拼音
      */
-    private function getCharPinyin($char, $withTone, $context = [], $tempMap = []) {
+    private function getCharPinyin($char, $withTone, $context = [], $tempMap = [])
+    {
         $type = $withTone ? 'with_tone' : 'no_tone';
-    
-        // 数字/字母直接返回
-        if (ctype_alnum($char)) {
+        
+        // 这里直接使用特殊字符中的 delete_allow  配置项, 既 数字/字母和允许的特殊字符直接返回
+        if (preg_match('/^['.$this->config['special_char']['delete_allow'].']+$/', $char)) {
             return $char;
         }
-    
-        // 临时映射（单字处理） - 最高优先级
+
+        // 临时映射（单字处理）- 最高优先级
         if (isset($tempMap[$char])) {
-            // 直接使用用户指定的拼音，不根据withTone参数修改
-            $pinyin = $tempMap[$char];
-            return preg_replace('/\s+/', '', $pinyin);
+            return $this->cleanPinyin($tempMap[$char], true);
         }
-    
+
         // 自定义字典（区分单字/多字）
+        if ($this->dicts['custom'][$type] === null) {
+            $this->loadCustomDict($withTone);
+        }
+        
         if (isset($this->dicts['custom'][$type][$char])) {
             $pinyin = $this->getFirstPinyin($this->dicts['custom'][$type][$char]);
-            return mb_strlen($char, 'UTF-8') === 1 
-                ? preg_replace('/\s+/', '', $pinyin)
-                : $pinyin;
+            return $this->cleanPinyin($pinyin, mb_strlen($char, 'UTF-8') === 1);
         }
-    
-        // 其他字典（单字处理）
+        
+        // 多音字规则检查
+        $this->loadPolyphoneRules();
+        
+        if (isset($this->dicts['polyphone_rules'][$char])) {
+            // 先获取所有可能的拼音选项用于规则匹配
+            $pinyinArray = $this->getAllPinyinOptions($char, $withTone);
+            $matchedPinyin = $this->matchPolyphoneRule($char, $pinyinArray, $context, $withTone);
+            
+            if ($matchedPinyin !== null) {
+                // 根据withTone参数决定是否去除声调
+                if (!$withTone && preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $matchedPinyin)) {
+                    $matchedPinyin = $this->removeTone($matchedPinyin);
+                }
+                
+                return $this->cleanPinyin($matchedPinyin, true);
+            }
+        }
+        
+        // 其他字典（按照self_xxx, common_xxx, rare_xxx的顺序）
         $pinyinArray = $this->getAllPinyinOptions($char, $withTone);
-        $pinyin = count($pinyinArray) <= 1 
-            ? $this->getFirstPinyin($pinyinArray)
-            : ($this->matchPolyphoneRule($char, $pinyinArray, $context, $withTone) ?? $pinyinArray[0]);
-    
-        // 修复：根据withTone参数决定是否去除声调
+        $pinyin = $this->getFirstPinyin($pinyinArray);
+
+        // 根据withTone参数决定是否去除声调
         if (!$withTone && preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
             $pinyin = $this->removeTone($pinyin);
         }
         
-        return preg_replace('/\s+/', '', $pinyin);
+        // 修复：如果没有找到拼音，返回汉字本身
+        return !empty(trim($pinyin)) ? $this->cleanPinyin($pinyin, true) : $char;
     }
-
+    
+    /**
+     * 清理拼音字符串，去除多余空格
+     * @param string $pinyin 拼音字符串
+     * @param bool $removeAllSpaces 是否移除所有空格（单字时为true，多字时为false）
+     * @return string 清理后的拼音字符串
+     */
+    private function cleanPinyin($pinyin, $removeAllSpaces = false) {
+        if ($removeAllSpaces) {
+            return $this->processSpaces($pinyin, true);
+        }
+        return $pinyin;
+    }
     /**
      * 获取所有可能的拼音选项
      * @param string $char 汉字
@@ -667,37 +711,37 @@ class PinyinConverter implements ConverterInterface {
     private function getAllPinyinOptions($char, $withTone) {
         $type = $withTone ? 'with_tone' : 'no_tone';
 
-        // 1. 自定义字典（最高优先级）
-        $this->loadCustomDict($withTone);
-        if (isset($this->dicts['custom'][$type][$char])) {
-            $pinyin = $this->dicts['custom'][$type][$char];
-            return $this->parsePinyinOptions($pinyin);
+        // 1. 自学习字典
+        if ($this->dicts['self_learn'][$type] === null) {
+            $this->loadSelfLearnDict($withTone);
         }
-
-        // 2. 基础映射表
-        if (isset($this->basicPinyinMap[$char])) {
-            return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
-        }
-
-        // 3. 自学习字典
         if (isset($this->dicts['self_learn'][$type][$char])) {
             $pinyin = $this->dicts['self_learn'][$type][$char];
             return $this->parsePinyinOptions($pinyin);
         }
 
-        // 4. 常用字典
-        $this->loadCommonDict($withTone);
+        // 2. 常用字典
+        if ($this->dicts['common'][$type] === null) {
+            $this->loadCommonDict($withTone);
+        }
         if (isset($this->dicts['common'][$type][$char])) {
             $pinyin = $this->dicts['common'][$type][$char];
             return $this->parsePinyinOptions($pinyin);
         }
 
-        // 5. 生僻字字典（并自动增加到自学习字典）
-        $this->loadRareDict($withTone);
+        // 3. 生僻字字典（并自动增加到自学习字典）
+        if ($this->dicts['rare'][$type] === null) {
+            $this->loadRareDict($withTone);
+        }
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             $this->learnChar($char, $rawPinyin, $withTone);
             return $this->parsePinyinOptions($rawPinyin);
+        }
+
+        // 4. 基础映射表（作为最后的兜底）
+        if (isset($this->basicPinyinMap[$char])) {
+            return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
         }
 
         return [$char];
@@ -723,7 +767,7 @@ class PinyinConverter implements ConverterInterface {
             return array_unique(array_filter($result));
         }
         
-if (is_string($pinyin)) {
+        if (is_string($pinyin)) {
             // 如果是字符串，按空格拆分
             return array_unique(array_filter(explode(' ', $pinyin)));
         }
@@ -934,50 +978,40 @@ if (is_string($pinyin)) {
         $result = $text;
         $processedWords = [];
 
-        // 首先，按照词语长度降序排序，优先替换长词语
-        usort($this->customMultiWords[$type], function($a, $b) {
-            return mb_strlen($b['word']) - mb_strlen($a['word']);
-        });
-
         foreach ($this->customMultiWords[$type] as $item) {
             $word = $item['word'];
             if (in_array($word, $processedWords)) continue;
             
             // 检查文本中是否包含该词语
-            if (strpos($result, $word) !== false) {
-                $pinyin = $this->getFirstPinyin($item['pinyin']);
-                // 将拼音中的空格替换为实际分隔符
-                $processedPinyin = str_replace(' ', $separator, $pinyin);
-                // 使用特殊标记来保护拼音字符串不被后续处理拆分
-                $protectedPinyin = "[[CUSTOM_PINYIN:{$processedPinyin}]]";
-                
-                // 使用正则表达式进行替换，处理各种边界情况
-                // 1. 处理词语前后都接非中文字符的情况
-                $result = preg_replace(
-                    '/([a-zA-Z0-9])(' . preg_quote($word, '/') . ')([a-zA-Z0-9])/u',
-                    '$1' . $separator . $protectedPinyin . $separator . '$3',
-                    $result
-                );
-                
-                // 2. 处理词语前接非中文字符的情况
-                $result = preg_replace(
-                    '/([a-zA-Z0-9])(' . preg_quote($word, '/') . ')/u',
-                    '$1' . $separator . $protectedPinyin,
-                    $result
-                );
-                
-                // 3. 处理词语后接非中文字符的情况
-                $result = preg_replace(
-                    '/(' . preg_quote($word, '/') . ')([a-zA-Z0-9])/u',
-                    $protectedPinyin . $separator . '$2',
-                    $result
-                );
-                
-                // 4. 处理词语出现在文本末尾的情况
-                $result = str_replace($word, $protectedPinyin, $result);
-                
-                $processedWords[] = $word;
-            }
+                if (strpos($result, $word) !== false) {
+                    $pinyin = $this->getFirstPinyin($item['pinyin']);
+                    // 将拼音中的空格替换为实际分隔符
+                    $processedPinyin = str_replace(' ', $separator, $pinyin);
+                    // 使用特殊标记来保护拼音字符串不被后续处理拆分
+                    $protectedPinyin = "[[CUSTOM_PINYIN:{$processedPinyin}]]";
+                    
+                    // 优化：使用一个正则表达式处理所有边界情况
+                    $result = preg_replace_callback(
+                        '/([a-zA-Z0-9]?)(' . preg_quote($word, '/') . ')([a-zA-Z0-9]?)/u',
+                        function($matches) use ($separator, $protectedPinyin) {
+                            $before = $matches[1];
+                            $after = $matches[3];
+                            
+                            if ($before && $after) {
+                                return $before . $separator . $protectedPinyin . $separator . $after;
+                            } elseif ($before) {
+                                return $before . $separator . $protectedPinyin;
+                            } elseif ($after) {
+                                return $protectedPinyin . $separator . $after;
+                            } else {
+                                return $protectedPinyin;
+                            }
+                        },
+                        $result
+                    );
+                    
+                    $processedWords[] = $word;
+                }
         }
 
         return [$result, $processedWords];
@@ -1027,21 +1061,20 @@ if (is_string($pinyin)) {
         // 仅在 delete 模式下执行预处理（避免干扰 replace 模式）
         if ($charConfig['mode'] === 'delete') {
             // 删除模式下，只保留中文字符和用户定义的特殊字符 
-            // 注意这里使用了 \x{4e00}-\x{9fa5} 来匹配Unicode 编码里面的普通汉字 仅包含 GB2312 标准中的 “基本汉字集”（约 20902 个简体 / 繁体常用汉字），不包含汉字标点符号等
-            // 而 \p{Han} 属于 Unicode 属性类（\p{属性名}），Han 是 Unicode 标准中定义的 “汉字属性”，表示 “所有具有汉字特征的字符”。
-            $text = preg_replace('/[^\x{4e00}-\x{9fa5}'.$this->config['special_char']['delete_allow'].']+/u', ' ', $text);
-            if(strpos($text, '  ') !== false) $text = preg_replace('/\s{2,}/', ' ', $text);
+            // 注意这里使用了 \\x{4e00}-\\x{9fa5} 来匹配Unicode 编码里面的普通汉字 仅包含 GB2312 标准中的 “基本汉字集”（约 20902 个简体 / 繁体常用汉字），不包含汉字标点符号等
+            // 而 \\p{Han} 属于 Unicode 属性类（\\p{属性名}），Han 是 Unicode 标准中定义的 “汉字属性”，表示 “所有具有汉字特征的字符”。
+            $text = preg_replace('/[^\\x{4e00}-\\x{9fa5}'.$this->config['special_char']['delete_allow'].']+/u', ' ', $text);
         }
 
         $cacheKey = md5(json_encode([$text, $separator, $withTone, $charConfig, $polyphoneTempMap]));
 
         // 缓存检查
-        foreach ($this->cache as $item) {
-            if ($item->key === $cacheKey) {
-                $this->cache->detach($item);
-                $this->cache->attach($item);
-                return $item->value;
-            }
+        if (isset($this->cache[$cacheKey])) {
+            // 移到数组末尾，实现LRU策略
+            $value = $this->cache[$cacheKey];
+            unset($this->cache[$cacheKey]);
+            $this->cache[$cacheKey] = $value;
+            return $value;
         }
 
         // 多字词语替换
@@ -1097,106 +1130,12 @@ if (is_string($pinyin)) {
                         $result[] = '';
                     }
                     
-                    for ($i = 0; $i < $len; $i++) {
-                        $char = mb_substr($part, $i, 1, 'UTF-8');
-                        $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
-
-                        if ($isHan) {
-                            if ($currentWord !== '') {
-                                $result[] = $currentWord;
-                                $currentWord = '';
-                            }
-                            
-                            $context = [
-                                'prev' => ($i > 0) ? mb_substr($part, $i - 1, 1, 'UTF-8') : '',
-                                'next' => ($i < $len - 1) ? mb_substr($part, $i + 1, 1, 'UTF-8') : '',
-                                'word' => ($i > 0 ? mb_substr($part, $i - 1, 1, 'UTF-8') : '') . $char . ($i < $len - 1 ? mb_substr($part, $i + 1, 1, 'UTF-8') : '')
-                            ];
-                            $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
-                            $result[] = $pinyin;
-                        } else {
-                            // 核心修改1：所有非汉字字符强制走 handleSpecialChar
-                            $handled = $this->handleSpecialChar($char, $charConfig);
-                            
-                            if ($handled !== '') {
-                                // 字母数字及允许的符号累积为单词，其他替换结果直接添加
-                                if (ctype_alnum($handled) || $handled === '-' || $handled === '.') {
-                                    $currentWord .= $handled;
-                                } else {
-                                    if ($currentWord !== '') {
-                                        $result[] = $currentWord;
-                                        $currentWord = '';
-                                    }
-                                    $result[] = $handled; // 核心修改2：replace模式的替换结果直接添加
-                                }
-                            } else {
-                                // 处理累积单词
-                                if ($currentWord !== '') {
-                                    $result[] = $currentWord;
-                                    $currentWord = '';
-                                }
-                            }
-                        }
-                    }
-                    
-                    if ($currentWord !== '') {
-                        $result[] = $currentWord;
-                        $currentWord = '';
-                    }
+                    $this->processTextPart($part, $withTone, $charConfig, $polyphoneTempMap, $result);
                 }
             }
         } else {
-            $len = mb_strlen($textAfterMultiWords, 'UTF-8');
-            $currentWord = ''; 
-            
-            for ($i = 0; $i < $len; $i++) {
-                $char = mb_substr($textAfterMultiWords, $i, 1, 'UTF-8');
-                $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
-
-                if ($isHan) {
-                    if ($currentWord !== '') {
-                        $result[] = $currentWord;
-                        $currentWord = '';
-                        $result[] = '';
-                    }
-                    
-                    $context = [
-                        'prev' => ($i > 0) ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '',
-                        'next' => ($i < $len - 1) ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '',
-                        'word' => ($i > 0 ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '') . $char . ($i < $len - 1 ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '')
-                    ];
-                    $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
-                    $result[] = $pinyin;
-                } else {
-                    // 核心修改3：所有非汉字字符强制走 handleSpecialChar
-                    $handled = $this->handleSpecialChar($char, $charConfig);
-                    
-                    if ($handled !== '') {
-                        if (ctype_alnum($handled) || $handled === '-' || $handled === '.') {
-                            $currentWord .= $handled;
-                        } else {
-                            if ($currentWord !== '') {
-                                $result[] = $currentWord;
-                                $currentWord = '';
-                            }
-                            $result[] = $handled; // 核心修改4：replace模式的替换结果直接添加
-                        }
-                    } else {
-                        if ($currentWord !== '') {
-                            $result[] = $currentWord;
-                            $currentWord = '';
-                        }
-                    }
-                }
-            }
-            if ($currentWord !== '') {
-                $result[] = $currentWord;
-                $currentWord = '';
-            }
-        }
-        
-        if ($currentWord !== '') {
-            $result[] = $currentWord;
+            // 没有自定义拼音标记的情况
+            $this->processTextPart($textAfterMultiWords, $withTone, $charConfig, $polyphoneTempMap, $result);
         }
 
         // 过滤空值并拼接
@@ -1219,15 +1158,91 @@ if (is_string($pinyin)) {
         $finalResult = str_replace('%', '', $finalResult);
 
         // 缓存结果
-        $cacheItem = (object)['key' => $cacheKey, 'value' => $finalResult];
-        $this->cache->attach($cacheItem);
-        if ($this->cache->count() > $this->config['high_freq_cache']['size']) {
-            $this->cache->rewind();
-            $this->cache->detach($this->cache->current());
+        $this->cache[$cacheKey] = $finalResult;
+        
+        // 维护LRU顺序并控制缓存大小
+        if (count($this->cache) > $this->config['high_freq_cache']['size']) {
+            // 删除第一个元素（最旧的）
+            reset($this->cache);
+            unset($this->cache[key($this->cache)]);
         }
 
         return $finalResult;
     }
+    
+    /**
+     * 处理文本部分，提取重复的字符处理逻辑
+     * @param string $text 要处理的文本部分
+     * @param bool $withTone 是否保留声调
+     * @param array $charConfig 字符配置
+     * @param array $polyphoneTempMap 临时多音字映射表
+     * @param array &$result 结果数组（引用传递）
+     * @param string &$currentWord 累积单词（引用传递）
+     */
+    private function processTextPart($text, $withTone, $charConfig, $polyphoneTempMap, &$result) {
+        $len = mb_strlen($text, 'UTF-8');
+        $currentWord = ''; // 在方法内部定义变量
+        
+        // 预处理：获取所有字符
+        $chars = [];
+        for ($i = 0; $i < $len; $i++) {
+            $chars[] = mb_substr($text, $i, 1, 'UTF-8');
+        }
+        
+        for ($i = 0; $i < $len; $i++) {
+            $char = $chars[$i];
+            $prevChar = $i > 0 ? $chars[$i - 1] : '';
+            $nextChar = $i < $len - 1 ? $chars[$i + 1] : '';
+            
+            // 检测是否为汉字
+            $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
+    
+            if ($isHan) {
+                if ($currentWord !== '') {
+                    $result[] = $currentWord;
+                    $currentWord = '';
+                    if ($i > 0 && !preg_match('/\p{Han}/u', $prevChar)) {
+                        $result[] = '';
+                    }
+                }
+                
+                $context = [
+                    'prev' => $prevChar,
+                    'next' => $nextChar,
+                    'word' => $prevChar . $char . $nextChar
+                ];
+                $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
+                $result[] = $pinyin;
+            } else {
+                // 所有非汉字字符强制走 handleSpecialChar
+                $handled = $this->handleSpecialChar($char, $charConfig);
+                
+                if ($handled !== '') {
+                    // 字母数字及允许的符号累积为单词，其他替换结果直接添加
+                    if (preg_match('/^[\\p{L}\\p{N}]+$/u', $handled) || $handled === '-' || $handled === '.') {
+                        $currentWord .= $handled;
+                    } else {
+                        if ($currentWord !== '') {
+                            $result[] = $currentWord;
+                            $currentWord = '';
+                        }
+                        $result[] = $handled;
+                    }
+                } else {
+                    // 处理累积单词
+                    if ($currentWord !== '') {
+                        $result[] = $currentWord;
+                        $currentWord = '';
+                    }
+                }
+            }
+        }
+        
+        if ($currentWord !== '') {
+            $result[] = $currentWord;
+        }
+    }
+    
 
     /**
      * 转换为URL Slug

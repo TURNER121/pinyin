@@ -27,8 +27,4 @@ $result1 = $converter->convert($testText, ' ', false,  [
 ]);
 
 
-// vd($result1);
-
-// 复制整个data目录到.tmp/目录
-$x = FileUtil::copyDict('./tmp/');
-vd($x);
+vd($result1);
