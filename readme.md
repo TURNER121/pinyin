@@ -1,203 +1,199 @@
 
-字典查找的优先级顺序应该是：
+# 汉字转拼音工具
 
-自定义字典
-基础映射表
-自学习字典
-常用字典
-生僻字字典（并自动增加到自学习字典）
+[![License](https://poser.pugx.org/tekintian/pinyin/license)](https://packagist.org/packages/tekintian/pinyin)
+[![Latest Stable Version](https://poser.pugx.org/tekintian/pinyin/v/stable)](https://packagist.org/packages/tekintian/pinyin)
+[![Total Downloads](https://poser.pugx.org/tekintian/pinyin/downloads)](https://packagist.org/packages/tekintian/pinyin)
 
+一个功能强大的汉字转拼音工具，支持自定义映射、特殊字符处理、自动学习功能和多音字处理。
 
-仅测试某个方法
-./vendor/bin/phpunit tests/PinyinConverterTest.php --filter testPolyphoneRules
+## 功能特点
 
+- ✨ **精准的汉字转拼音**：支持常用字和生僻字的准确拼音转换
+- 🎛️ **三种特殊字符处理模式**：`keep`/`delete`/`replace`，满足不同场景需求
+- 🔍 **自动学习功能**：自动识别并记忆生僻字的拼音
+- 🔀 **多音字处理**：支持多音字的准确转换
+- 📝 **URL友好的Slug生成**：适合用于生成SEO友好的URL
+- 📚 **自定义字典**：支持用户定义的汉字拼音映射
+- 🔧 **灵活的参数配置**：满足不同使用场景的需求
 
+## 安装
 
-针对你提出的**特殊字符处理失效**、**替换不灵活**、**参数传递不便**这三个核心问题，以下是彻底优化方案。优化后将实现特殊字符精准处理、支持自定义替换规则，同时提供更灵活的参数传递方式，完全适配实际使用场景。
+使用Composer安装：
 
-### 核心优化内容
-1.  **修复特殊字符处理失效**：修正模式判断逻辑，确保`keep`/`delete`/`replace`三种模式独立生效，无串扰；
-2.  **支持自定义替换数组**：允许用户传入自定义特殊字符映射，覆盖或补充默认映射；
-3.  **优化参数传递方式**：支持**字符串快捷模式**和**数组自定义模式**，兼顾便捷性和灵活性。
+```bash
+composer require tekintian/pinyin
+```
 
-### 最终优化代码（PinyinConverter.php）
+## 基本使用
+
 ```php
-<?php
-/**
- * 优化版自学习汉字转拼音工具
- * 核心改进：特殊字符精准处理+自定义替换+灵活参数传递
- */
-class PinyinConverter {
-    private $config = [
-        'dict' => [
-            'common' => [
-                'with_tone' => 'dict/common_with_tone.php',
-                'no_tone' => 'dict/common_no_tone.php'
-            ],
-            'rare' => [
-                'with_tone' => 'dict/rare_with_tone.php',
-                'no_tone' => 'dict/rare_no_tone.php'
-            ],
-            'polyphone_custom' => 'dict/polyphone_custom.php'
-        ],
-        'special_char' => [
-            'default_mode' => 'delete', // 默认模式
-            'default_map' => [          // 默认替换映射
-                '，' => ',', '。' => '.', '！' => '!', '？' => '?',
-                '（' => '(', '）' => ')', '【' => '[', '】' => ']',
-                '、' => ',', '；' => ';', '：' => ':'
-            ],
-            'safe_chars' => 'a-zA-Z0-9\+\-_=\/\?\&.,;:\(\)\[\]' // 全局安全字符，所有模式均保留
-        ],
-        'high_freq_cache' => [
-            'size' => 1000
+use tekintian\pinyin\PinyinConverter;
+
+// 创建实例
+$pinyinConverter = new PinyinConverter();
+
+// 基本转换
+$pinyin = $pinyinConverter->convert('你好，世界！');
+echo $pinyin; // 输出: ni hao shi jie
+
+// 保留声调
+$pinyinWithTone = $pinyinConverter->convert('你好，世界！', ' ', true);
+echo $pinyinWithTone; // 输出: nǐ hǎo shì jiè
+
+// 自定义分隔符
+$pinyin = $pinyinConverter->convert('你好，世界！', '-');
+echo $pinyin; // 输出: ni-hao-shi-jie
+
+// 生成URL Slug
+$slug = $pinyinConverter->getUrlSlug('你好，世界！');
+echo $slug; // 输出: ni-hao-shi-jie
+```
+
+## 特殊字符处理
+
+本工具提供三种特殊字符处理模式：
+
+1. **delete模式**：删除所有特殊字符（默认模式）
+2. **keep模式**：保留所有特殊字符
+3. **replace模式**：将特殊字符替换为对应的英文符号
+
+```php
+// delete模式（默认）
+$pinyin = $pinyinConverter->convert('你好，世界！', ' ', false, 'delete');
+echo $pinyin; // 输出: ni hao shi jie
+
+// keep模式
+$pinyin = $pinyinConverter->convert('你好，世界！', ' ', false, 'keep');
+echo $pinyin; // 输出: ni hǎo ， shì jiè ！
+
+// replace模式
+$pinyin = $pinyinConverter->convert('你好，世界！', ' ', false, 'replace');
+echo $pinyin; // 输出: ni hǎo , shì jiè !
+
+// 使用自定义替换数组
+$customReplace = [
+    '，' => ', ',
+    '！' => '! ',
+    '。' => '. '
+];
+$pinyin = $pinyinConverter->convert('你好，世界！', ' ', false, $customReplace);
+echo $pinyin; // 输出: ni hǎo , shì jiè !
+```
+
+## 高级配置
+
+创建实例时可以传入配置数组，自定义工具的行为：
+
+```php
+$config = [
+    'special_char' => [
+        'default_mode' => 'replace',
+        'custom_map' => [
+            '，' => ', ',
+            '。' => '. ',
+            '！' => '! ',
+            '？' => '? ',
+            '、' => ', ',
+            '；' => '; ',
+            '：' => ': '
         ]
-    ];
+    ],
+    'high_freq_cache' => [
+        'size' => 2000 // 增大高频缓存大小
+    ]
+];
 
-    private $dicts = [
-        'common' => ['with_tone' => null, 'no_tone' => null],
-        'rare' => ['with_tone' => null, 'no_tone' => null],
-        'custom' => null
-    ];
+$pinyinConverter = new PinyinConverter($config);
+```
 
-    private $learnedChars = [];
-    private $cache;
-    private $finalCharMap = []; // 合并默认和自定义的替换映射
+## API参考
 
-    public function __construct($options = []) {
-        // 合并配置
-        $this->config = array_merge_recursive($this->config, $options);
-        // 初始化缓存
-        $this->cache = new SplObjectStorage();
-        // 合并默认映射和用户自定义映射
-        $this->finalCharMap = $this->config['special_char']['default_map'];
-        if (isset($options['special_char']['custom_map']) && is_array($options['special_char']['custom_map'])) {
-            $this->finalCharMap = array_merge($this->finalCharMap, $options['special_char']['custom_map']);
-        }
-        // 加载自定义字典
-        $this->loadCustomDict();
-    }
+### PinyinConverter 类
 
-    /**
-     * 加载自定义字典
-     */
-    private function loadCustomDict() {
-        $path = $this->config['dict']['polyphone_custom'];
-        if (!file_exists($path)) {
-            file_put_contents($path, "<?php\nreturn [];\n");
-            $this->dicts['custom'] = [];
-            return;
-        }
-        $data = require $path;
-        $this->dicts['custom'] = is_array($data) ? $data : [];
-    }
+#### 构造函数
 
-    /**
-     * 懒加载常用字字典
-     */
-    private function loadCommonDict($withTone) {
-        $type = $withTone ? 'with_tone' : 'no_tone';
-        if ($this->dicts['common'][$type] !== null) return;
-        $path = $this->config['dict']['common'][$type];
-        $this->dicts['common'][$type] = file_exists($path) ? require $path : [];
-    }
+```php
+/**
+ * 创建拼音转换器实例
+ *
+ * @param array $options 配置选项
+ */
+public function __construct(array $options = [])
+```
 
-    /**
-     * 懒加载生僻字字典
-     */
-    private function loadRareDict($withTone) {
-        $type = $withTone ? 'with_tone' : 'no_tone';
-        if ($this->dicts['rare'][$type] !== null) return;
-        $path = $this->config['dict']['rare'][$type];
-        $this->dicts['rare'][$type] = file_exists($path) ? require $path : [];
-    }
+#### convert 方法
 
-    /**
-     * 三级链获取汉字拼音
-     */
-    private function getCharPinyin($char, $withTone) {
-        $type = $withTone ? 'with_tone' : 'no_tone';
+```php
+/**
+ * 将汉字转换为拼音
+ *
+ * @param string $text 要转换的文本
+ * @param string $separator 拼音分隔符，默认为空格
+ * @param bool $withTone 是否保留声调，默认为false
+ * @param array|string $specialCharParam 特殊字符处理参数，默认为空数组
+ * @param array $polyphoneTempMap 临时多音字映射表，默认为空数组
+ * @return string 转换后的拼音字符串
+ */
+public function convert(
+    string $text,
+    string $separator = ' ',
+    bool $withTone = false,
+    $specialCharParam = [],
+    array $polyphoneTempMap = []
+): string
+```
 
-        // 1. 自定义字典优先
-        if (isset($this->dicts['custom'][$char][$type])) {
-            return $this->getFirstPinyin($this->dicts['custom'][$char][$type]);
-        }
+#### getUrlSlug 方法
 
-        // 2. 常用字字典
-        $this->loadCommonDict($withTone);
-        if (isset($this->dicts['common'][$type][$char])) {
-            $pinyin = $this->dicts['common'][$type][$char];
-            return $this->getFirstPinyin($pinyin);
-        }
+```php
+/**
+ * 生成URL友好的slug
+ *
+ * @param string $text 要转换的文本
+ * @param string $separator slug分隔符，默认为'-'
+ * @return string 生成的slug字符串
+ */
+public function getUrlSlug(string $text, string $separator = '-'): string
+```
 
-        // 3. 生僻字字典+自动学习
-        $this->loadRareDict($withTone);
-        $code = mb_ord($char, 'UTF-8');
-        if ($code < 19968 || $code > 40869) {
-            return $char;
-        }
-        $index = $code - 19968;
-        $commonCount = count($this->dicts['common'][$type] ?? []);
-        $rareIndex = $index - $commonCount;
-        if ($rareIndex >= 0 && isset($this->dicts['rare'][$type][$rareIndex]) && !empty($this->dicts['rare'][$type][$rareIndex])) {
-            $pinyin = $this->dicts['rare'][$type][$rareIndex];
-            $this->learnChar($char, $pinyin, $withTone);
-            return $this->getFirstPinyin($pinyin);
-        }
+## 测试
 
-        return $char;
-    }
+运行测试：
 
-    /**
-     * 自动学习生僻字
-     */
-    private function learnChar($char, $pinyinWithTone, $withTone) {
-        if (isset($this->dicts['custom'][$char]) || isset($this->learnedChars[$char])) return;
-        $pinyinNoTone = $this->removeTone($pinyinWithTone);
-        $this->learnedChars[$char] = [
-            'with_tone' => $pinyinWithTone,
-            'no_tone' => $pinyinNoTone
-        ];
-        $this->dicts['custom'][$char] = [
-            'with_tone' => $pinyinWithTone,
-            'no_tone' => $pinyinNoTone
-        ];
-        echo "\n🔍 自动学习汉字：{$char}（拼音：{$pinyinNoTone}）";
-    }
+```bash
+composer test
+```
 
-    /**
-     * 持久化学习内容
-     */
-    private function saveLearnedChars() {
-        if (empty($this->learnedChars)) return;
-        $path = $this->config['dict']['polyphone_custom'];
-        $existing = $this->dicts['custom'] ?? [];
-        $merged = array_merge($existing, $this->learnedChars);
-        $content = "<?php\n/** 自定义字典（含自动学习）**/\nreturn " . var_export($merged, true) . ";\n";
-        file_put_contents($path, $content);
-        $this->learnedChars = [];
-    }
+检查代码风格：
 
-    /**
-     * 取多音字第一个读音
-     */
-    private function getFirstPinyin($pinyin) {
-        $parts = explode(' ', trim($pinyin));
-        foreach ($parts as $part) {
-            if (!empty($part)) return $part;
-        }
-        return '';
-    }
+```bash
+composer check-style
+```
 
-    /**
-     * 去除拼音声调
-     */
-    private function removeTone($pinyin) {
-        $toneMap = [
-            'ā' => 'a', 'á' => 'a', 'ǎ' => 'a', 'à' => 'a',
-            'ō' => 'o', 'ó' => 'o', 'ǒ' => 'o', 'ò' => 'o',
-            'ē' => 'e', 'é' => 'e', 'ě' => 'e', 'è' => 'e',
-            'ī' => 'i', 'í' => 'i', 'ǐ' => 'i', 'ì' => 'i',
+修复代码风格问题：
+
+```bash
+composer fix-style
+```
+
+## 性能优化
+
+- 该工具使用多级缓存机制，包括高频缓存和学习缓存，提高重复文本的转换速度
+- 采用懒加载策略，只在需要时加载相关字典
+- 自动学习生僻字，避免重复查找
+
+## 贡献指南
+
+请阅读[CONTRIBUTING.md](CONTRIBUTING.md)了解如何参与项目开发。
+
+## 版本历史
+
+请查看[CHANGELOG.md](CHANGELOG.md)了解版本更新历史。
+
+## 许可证
+
+本项目使用MIT许可证，详情请查看[LICENSE](LICENSE)文件。
             'ū' => 'u', 'ú' => 'u', 'ǔ' => 'u', 'ù' => 'u',
             'ü' => 'v', 'ǖ' => 'v', 'ǘ' => 'v', 'ǚ' => 'v', 'ǜ' => 'v',
             'ń' => 'n', 'ň' => 'n', '' => 'm'

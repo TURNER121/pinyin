@@ -1,11 +1,14 @@
 <?php
 namespace tekintian\pinyin;
 
+use tekintian\pinyin\Contracts\ConverterInterface;
+use tekintian\pinyin\Exception\PinyinException;
+
 /**
- * 汉字转拼音工具（最终稳定版）
- * 支持：多字词语空格保留、单字拼音去空格、特殊字符过滤、自定义词典
+ * AI自学习汉字转拼音工具
+ * 支持：特殊字符精准处理+自定义替换+灵活参数传递
  */
-class PinyinConverter {
+class PinyinConverter implements ConverterInterface {
     /**
      * 配置参数
      * @var array
@@ -264,7 +267,7 @@ class PinyinConverter {
 
         $pinyinArray = array_filter($pinyinArray);
         if (empty($pinyinArray)) {
-            throw new \Exception("自定义拼音不能为空或包含无效字符");
+            throw new PinyinException("自定义拼音不能为空或包含无效字符", PinyinException::ERROR_INVALID_INPUT);
         }
 
         $this->dicts['custom'][$type][$char] = $pinyinArray;
@@ -979,48 +982,45 @@ if (is_string($pinyin)) {
     }
 
     /**
-     * 自定义短数组序列化
-     * @param array $array 数组
-     * @param int $indent 缩进
-     * @return string 短数组字符串
+     * 紧凑数组序列化（用于字典文件）
      */
-    private function shortArrayExport($array, $indent = 4) {
-        if (empty($array)) {
-            return '[]';
-        }
-
+    private function shortArrayExport($array) {
+        if (empty($array)) return '[]';
         $isAssoc = array_keys($array) !== range(0, count($array) - 1);
-        $spaces = str_repeat(' ', $indent);
-        $result = "[" . "\n";
+        $items = [];
 
         foreach ($array as $key => $value) {
-            $keyStr = $isAssoc ? (is_string($key) ? "'{$key}'" : $key) . " => " : '';
-
+            $keyStr = $isAssoc ? "'" . str_replace("'", "\\'", $key) . "' => " : '';
             if (is_array($value)) {
-                $valueStr = $this->shortArrayExport($value, $indent + 4);
-            } elseif (is_string($value)) {
-                $valueStr = "'" . str_replace("'", "\'", $value) . "'";
+                $valueItems = array_map(function($item) {
+                    return "'" . str_replace("'", "\\'", $item) . "'";
+                }, $value);
+                $valueStr = '[' . implode(',', $valueItems) . ']';
             } else {
-                $valueStr = var_export($value, true);
+                $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
             }
-
-            $result .= "{$spaces}{$keyStr}{$valueStr},\n";
+            $items[] = $keyStr . $valueStr;
         }
-
-        $result .= str_repeat(' ', $indent - 4) . "]";
-        return $result;
+        return "[\n    " . implode(",\n    ", $items) . "\n]";
     }
 
     /**
      * 转换文本为拼音（最终处理）
+     *
+     * @param string $text 要转换的文本
+     * @param string $separator 拼音分隔符，默认为空格
+     * @param bool $withTone 是否保留声调，默认为false
+     * @param array|string $specialCharParam 特殊字符处理参数，默认为空数组
+     * @param array $polyphoneTempMap 临时多音字映射表，默认为空数组
+     * @return string 转换后的拼音字符串
      */
     public function convert(
-        $text,
-        $separator = ' ',
-        $withTone = false,
-        $specialCharParam = '',
-        $polyphoneTempMap = []
-    ) {
+        string $text,
+        string $separator = ' ',
+        bool $withTone = false,
+        $specialCharParam = [],
+        array $polyphoneTempMap = []
+    ): string {
         $charConfig = $this->parseCharParam($specialCharParam);
         // 仅在 delete 模式下执行预处理（避免干扰 replace 模式）
         if ($charConfig['mode'] === 'delete') {
@@ -1233,7 +1233,7 @@ if (is_string($pinyin)) {
      * @param string $separator 分隔符
      * @return string URL Slug
      */
-    public function getUrlSlug($text, $separator = '-') {
+    public function getUrlSlug(string $text, string $separator = '-'): string {
         $separator = $separator ?: '-';
         
         // 对于包含特殊字符的文本，先预处理特殊字符
