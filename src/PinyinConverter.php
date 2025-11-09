@@ -624,9 +624,10 @@ $data = file_exists($path) ? require $path : [];
             return $char;
         }
     
-        // 临时映射（单字处理）
+        // 临时映射（单字处理） - 最高优先级
         if (isset($tempMap[$char])) {
-            $pinyin = $withTone ? $tempMap[$char] : $this->removeTone($tempMap[$char]);
+            // 直接使用用户指定的拼音，不根据withTone参数修改
+            $pinyin = $tempMap[$char];
             return preg_replace('/\s+/', '', $pinyin);
         }
     
@@ -925,10 +926,16 @@ $data = file_exists($path) ? require $path : [];
         foreach ($this->customMultiWords[$type] as $item) {
             $word = $item['word'];
             if (in_array($word, $processedWords)) continue;
-            $pinyin = $this->getFirstPinyin($item['pinyin']);
-            // 修复：确保自定义多字词语的拼音中正确保留空格
-            $result = str_replace($word, $pinyin, $result);
-            $processedWords[] = $word;
+            
+            // 检查文本中是否包含该词语
+            if (strpos($result, $word) !== false) {
+                $pinyin = $this->getFirstPinyin($item['pinyin']);
+                // 修复：确保自定义多字词语的拼音中正确保留空格
+                // 使用特殊标记来保护拼音字符串不被后续处理拆分
+                $protectedPinyin = "[[CUSTOM_PINYIN:{$pinyin}]]";
+                $result = str_replace($word, $protectedPinyin, $result);
+                $processedWords[] = $word;
+            }
         }
 
         return [$result, $processedWords];
@@ -991,49 +998,136 @@ $data = file_exists($path) ? require $path : [];
         }
 
         // 多字词语替换
-        list($textAfterMultiWords) = $this->replaceCustomMultiWords($text, $withTone, $separator);
+        list($textAfterMultiWords, $processedWords) = $this->replaceCustomMultiWords($text, $withTone, $separator);
 
-        // 逐字符处理（改进：保持英文单词和数字的完整性）
+        // 检查是否已经完成了自定义多字词语的替换
+        // 如果文本中不再包含汉字，说明已经完成了自定义多字词语的替换，直接返回结果
+        if (!preg_match('/\p{Han}/u', $textAfterMultiWords)) {
+            // 移除保护标记
+            $textAfterMultiWords = str_replace(['[[CUSTOM_PINYIN:', ']]'], '', $textAfterMultiWords);
+            return $textAfterMultiWords;
+        }
+
+        // 处理自定义多字词语的保护标记
         $result = [];
-        $len = mb_strlen($textAfterMultiWords, 'UTF-8');
-        $currentWord = ''; // 用于累积连续的字母和数字
+        $customPinyinMatches = [];
         
-        for ($i = 0; $i < $len; $i++) {
-            $char = mb_substr($textAfterMultiWords, $i, 1, 'UTF-8');
-            $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
-
-            if ($isHan) {
-                // 处理累积的英文单词或数字
-                if ($currentWord !== '') {
-                    $result[] = $currentWord;
-                    $currentWord = '';
-                }
-                
-                $context = [
-                    'prev' => ($i > 0) ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '',
-                    'next' => ($i < $len - 1) ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '',
-                    'word' => ($i > 0 ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '') . $char . ($i < $len - 1 ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '')
-                ];
-                $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
-                $result[] = $pinyin;
-            } else {
-                $handled = $this->handleSpecialChar($char, $charConfig);
-                
-                // 如果是字母或数字，累积到当前单词中
-                if ($handled !== '' && (ctype_alnum($handled) || $handled === '-')) {
-                    $currentWord .= $handled;
+        // 提取所有自定义多字词语的保护标记
+        preg_match_all('/\[\[CUSTOM_PINYIN:([^\]]+)\]\]/', $textAfterMultiWords, $matches, PREG_SET_ORDER);
+        foreach ($matches as $match) {
+            $customPinyinMatches[$match[0]] = $match[1];
+        }
+        
+        // 如果有自定义多字词语，先处理它们
+        if (!empty($customPinyinMatches)) {
+            $parts = preg_split('/\[\[CUSTOM_PINYIN:[^\]]+\]\]/', $textAfterMultiWords, -1, PREG_SPLIT_DELIM_CAPTURE);
+            
+            foreach ($parts as $part) {
+                if (isset($customPinyinMatches[$part])) {
+                    // 这是自定义多字词语的拼音，直接添加到结果中
+                    $result[] = $customPinyinMatches[$part];
                 } else {
+                    // 这是普通文本，需要进一步处理
+                    $len = mb_strlen($part, 'UTF-8');
+                    $currentWord = ''; // 用于累积连续的字母和数字
+                    
+                    for ($i = 0; $i < $len; $i++) {
+                        $char = mb_substr($part, $i, 1, 'UTF-8');
+                        $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
+
+                        if ($isHan) {
+                            // 处理累积的英文单词或数字
+                            if ($currentWord !== '') {
+                                $result[] = $currentWord;
+                                $currentWord = '';
+                                // 在英文单词和中文拼音之间添加分隔符占位符
+                                $result[] = '';
+                            }
+                            
+                            $context = [
+                                'prev' => ($i > 0) ? mb_substr($part, $i - 1, 1, 'UTF-8') : '',
+                                'next' => ($i < $len - 1) ? mb_substr($part, $i + 1, 1, 'UTF-8') : '',
+                                'word' => ($i > 0 ? mb_substr($part, $i - 1, 1, 'UTF-8') : '') . $char . ($i < $len - 1 ? mb_substr($part, $i + 1, 1, 'UTF-8') : '')
+                            ];
+                            $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
+                            $result[] = $pinyin;
+                        } else {
+                            $handled = $this->handleSpecialChar($char, $charConfig);
+                            
+                            // 如果是字母、数字或版本号中的点号，累积到当前单词中
+                            if ($handled !== '' && (ctype_alnum($handled) || $handled === '-' || $handled === '.')) {
+                                $currentWord .= $handled;
+                            } else {
+                                // 处理累积的英文单词或数字
+                                if ($currentWord !== '') {
+                                    $result[] = $currentWord;
+                                    $currentWord = '';
+                                }
+                                
+                                // 处理特殊字符
+                                if ($handled !== '') {
+                                    $result[] = $handled;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 处理末尾的累积单词
+                    if ($currentWord !== '') {
+                        $result[] = $currentWord;
+                    }
+                }
+            }
+        } else {
+            // 没有自定义多字词语，使用原来的字符处理逻辑
+            $len = mb_strlen($textAfterMultiWords, 'UTF-8');
+            $currentWord = ''; // 用于累积连续的字母和数字
+            
+            for ($i = 0; $i < $len; $i++) {
+                $char = mb_substr($textAfterMultiWords, $i, 1, 'UTF-8');
+                $isHan = preg_match('/\p{Han}/u', $char) ? true : false;
+
+                if ($isHan) {
                     // 处理累积的英文单词或数字
                     if ($currentWord !== '') {
                         $result[] = $currentWord;
                         $currentWord = '';
+                        // 在英文单词和中文拼音之间添加分隔符占位符
+                        $result[] = '';
                     }
                     
-                    // 处理特殊字符
-                    if ($handled !== '') {
-                        $result[] = $handled;
+                    $context = [
+                        'prev' => ($i > 0) ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '',
+                        'next' => ($i < $len - 1) ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '',
+                        'word' => ($i > 0 ? mb_substr($textAfterMultiWords, $i - 1, 1, 'UTF-8') : '') . $char . ($i < $len - 1 ? mb_substr($textAfterMultiWords, $i + 1, 1, 'UTF-8') : '')
+                    ];
+                    $pinyin = $this->getCharPinyin($char, $withTone, $context, $polyphoneTempMap);
+                    $result[] = $pinyin;
+                } else {
+                    $handled = $this->handleSpecialChar($char, $charConfig);
+                    
+                    // 如果是字母、数字或版本号中的点号，累积到当前单词中
+                    if ($handled !== '' && (ctype_alnum($handled) || $handled === '-' || $handled === '.')) {
+                        $currentWord .= $handled;
+                    } else {
+                        // 处理累积的英文单词或数字
+                        if ($currentWord !== '') {
+                            $result[] = $currentWord;
+                            $currentWord = '';
+                        }
+                        
+                        // 处理特殊字符
+                        if ($handled !== '') {
+                            $result[] = $handled;
+                        }
                     }
                 }
+            
+            // 处理末尾的累积单词
+            if ($currentWord !== '') {
+               
+                        $result[] = $handled;
+                    }
             }
         }
         
@@ -1044,7 +1138,7 @@ $data = file_exists($path) ? require $path : [];
 
         // 过滤空值并拼接
         $filtered = array_filter($result, function ($item) {
-            return trim($item) !== '';
+            return $item !== ''; // 只过滤真正的空字符串，保留空字符串分隔符占位符
         });
         $finalResult = implode($separator, $filtered);
 

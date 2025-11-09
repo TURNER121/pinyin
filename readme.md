@@ -8,7 +8,8 @@
 生僻字字典（并自动增加到自学习字典）
 
 
-
+仅测试某个方法
+./vendor/bin/phpunit tests/PinyinConverterTest.php --filter testPolyphoneRules
 
 
 
