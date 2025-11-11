@@ -260,8 +260,8 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             // 懒加载模式：只预加载常用字典
             $this->loadDictsByStrategy($strategy, $preloadPriority);
         } else {
-            // 全量加载模式：加载所有字典
-            $this->loadDictsByStrategy($strategy, ['common', 'self_learn', 'rare', 'custom']);
+            // 全量加载模式：加载所有字典（不包括self_learn，因为它在未合并前已包含在rare字典内）
+            $this->loadDictsByStrategy($strategy, ['common', 'rare', 'custom']);
         }
     }
     
