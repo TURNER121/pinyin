@@ -26,16 +26,22 @@ class PinyinConverter implements ConverterInterface {
             ],
             'self_learn' => [
                 'with_tone' => __DIR__.'/../data/self_learn_with_tone.php',
-                'no_tone' => __DIR__.'/../data/self_learn_no_tone.php',
-                'frequency' => __DIR__.'/../data/char_frequency.php'
+                'no_tone' => __DIR__.'/../data/self_learn_no_tone.php'
             ],
             'custom' => [
                 'with_tone' => __DIR__.'/../data/custom_with_tone.php',
                 'no_tone' => __DIR__.'/../data/custom_no_tone.php'
             ],
             'polyphone_rules' => __DIR__.'/../data/polyphone_rules.php',
+            'frequency' => __DIR__.'/../data/char_frequency.php',
             'backup' => __DIR__.'/../data/backup/',
             'not_found' => __DIR__.'/../data/diy/not_found_chars.php'
+        ],
+        'dict_loading' => [
+            'strategy' => 'both', // 'both'|'with_tone'|'no_tone' - 字典加载策略
+            'lazy_loading' => true, // 是否启用懒加载（默认启用）
+            'preload_priority' => ['custom', 'common'], // 预加载优先级（移除自学习字典）
+            'lazy_dicts' => ['rare', 'self_learn'] // 懒加载的字典类型（添加自学习字典）
         ],
         'special_char' => [
             'default_mode' => 'delete',
@@ -50,11 +56,13 @@ class PinyinConverter implements ConverterInterface {
         'polyphone_priority' => ['行' => 0, '长' => 0, '乐' => 0],
         'self_learn_merge' => [
             'threshold' => 1000,
+            'batch_threshold' => 50, // 批量处理阈值
             'incremental' => true,
             'max_per_merge' => 500,
-            'frequency_limit' => 86400,
+            'frequency_limit' => 86400, // 24小时执行一次
             'backup_before_merge' => true,
-            'sort_by_frequency' => true
+            'sort_by_frequency' => true,
+            'enable_background_task' => true // 启用后台任务处理
         ]
     ];
 
@@ -88,7 +96,7 @@ class PinyinConverter implements ConverterInterface {
     private $notFoundChars = [];
 
     /**
-     * 自学习字使用频率计数
+     * 所有字和词语使用频率计数（key为字或词，value为调用次数）
      * @var array
      */
     private $charFrequency = [];
@@ -200,7 +208,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         if (!FileUtil::fileExists($polyPath)) {
             FileUtil::writeFile($polyPath, "<?php\nreturn [];\n");
         }
-        $freqPath = $this->config['dict']['self_learn']['frequency'];
+        $freqPath = $this->config['dict']['frequency'];
         if (!FileUtil::fileExists($freqPath)) {
             FileUtil::writeFile($freqPath, "<?php\nreturn [];\n");
         }
@@ -210,26 +218,147 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             FileUtil::writeFile($notFoundPath, "<?php\nreturn [];\n");
         }
         
-        $notFoundPath = $this->config['dict']['not_found'];
-        if (!FileUtil::fileExists($notFoundPath)) {
-            FileUtil::writeFile($notFoundPath, "<?php\nreturn [];\n");
+        // 初始化自学习字典数据来源文件
+        $this->initSelfLearnSources();
+    }
+
+    /**
+     * 初始化自学习字典数据来源文件
+     */
+    private function initSelfLearnSources() {
+        $sourceLogFile = $this->config['dict']['backup'] . '/self_learn_sources.json';
+        if (!FileUtil::fileExists($sourceLogFile)) {
+            FileUtil::writeFile($sourceLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+        
+        $mergeLogFile = $this->config['dict']['backup'] . '/immediate_merge_log.json';
+        if (!FileUtil::fileExists($mergeLogFile)) {
+            FileUtil::writeFile($mergeLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         }
     }
 
     /**
-     * 一次性加载所有字典
+     * 根据配置策略加载字典
      */
     private function loadAllDicts() {
-        $this->loadSelfLearnDict(true);
-        $this->loadSelfLearnDict(false);
-        $this->loadSelfLearnFrequency();
-        $this->loadCustomDict(true);
-        $this->loadCustomDict(false);
-        $this->loadCommonDict(true);
-        $this->loadCommonDict(false);
-        $this->loadRareDict(true);
-        $this->loadRareDict(false);
+        $strategy = $this->config['dict_loading']['strategy'];
+        $lazyLoading = $this->config['dict_loading']['lazy_loading'];
+        $preloadPriority = $this->config['dict_loading']['preload_priority'];
+        
+        // 加载多音字规则（总是需要）
         $this->loadPolyphoneRules();
+        
+        // 加载自学习频率（总是需要）
+        $this->loadSelfLearnFrequency();
+        
+        // 检查是否需要执行字典迁移（低频字符从常用字典迁移到生僻字字典）
+        // 注意：迁移操作会修改字典文件，需要谨慎处理，建议在定时任务中执行
+        // $this->checkAndExecuteMigration();
+        
+        // 根据懒加载配置决定加载策略
+        if ($lazyLoading) {
+            // 懒加载模式：只预加载常用字典
+            $this->loadDictsByStrategy($strategy, $preloadPriority);
+        } else {
+            // 全量加载模式：加载所有字典
+            $this->loadDictsByStrategy($strategy, ['common', 'self_learn', 'rare', 'custom']);
+        }
+    }
+    
+    /**
+     * 根据策略加载字典
+     * @param string $strategy 加载策略
+     * @param array $dictTypes 要加载的字典类型
+     */
+    private function loadDictsByStrategy(string $strategy, array $dictTypes) {
+        switch ($strategy) {
+            case 'with_tone':
+                $this->loadDictsByType(true, $dictTypes);
+                break;
+            case 'no_tone':
+                $this->loadDictsByType(false, $dictTypes);
+                break;
+            case 'both':
+            default:
+                $this->loadDictsByType(true, $dictTypes);
+                $this->loadDictsByType(false, $dictTypes);
+                break;
+        }
+    }
+    
+    /**
+     * 检查并执行字典迁移（低频字符从常用字典迁移到生僻字字典）
+     */
+    private function checkAndExecuteMigration() {
+        // 检查是否需要迁移（例如：每天执行一次）
+        $lastMigrationTime = $this->getLastMigrationTime();
+        $currentTime = time();
+        
+        // 24小时执行一次迁移
+        if (($currentTime - $lastMigrationTime) >= 86400) {
+            foreach (['with_tone', 'no_tone'] as $toneType) {
+                $this->migrateLowFrequencyChars($toneType);
+            }
+            $this->updateLastMigrationTime();
+        }
+    }
+    
+    /**
+     * 获取上次迁移时间
+     * @return int 时间戳
+     */
+    private function getLastMigrationTime() {
+        $path = $this->config['dict']['backup'] . "/last_migration.txt";
+        return FileUtil::fileExists($path) ? (int)FileUtil::readFile($path) : 0;
+    }
+    
+    /**
+     * 更新迁移时间记录
+     */
+    private function updateLastMigrationTime() {
+        $path = $this->config['dict']['backup'] . "/last_migration.txt";
+        FileUtil::writeFile($path, time());
+    }
+
+    /**
+     * 按类型和优先级加载字典
+     * @param bool $withTone 是否带声调
+     * @param array $dictTypes 要加载的字典类型
+     */
+    private function loadDictsByType(bool $withTone, array $dictTypes) {
+        foreach ($dictTypes as $dictType) {
+            switch ($dictType) {
+                case 'common':
+                    $this->loadCommonDict($withTone);
+                    break;
+                case 'self_learn':
+                    $this->loadSelfLearnDict($withTone);
+                    break;
+                case 'rare':
+                    $this->loadRareDict($withTone);
+                    break;
+                case 'custom':
+                    $this->loadCustomDict($withTone);
+                    break;
+            }
+        }
+    }
+    
+    /**
+     * 懒加载字典（按需加载）
+     * @param string $dictType 字典类型
+     * @param bool $withTone 是否带声调
+     */
+    private function lazyLoadDict(string $dictType, bool $withTone) {
+        if (!$this->config['dict_loading']['lazy_loading']) {
+            return;
+        }
+        
+        // 检查是否为懒加载字典
+        $lazyDicts = $this->config['dict_loading']['lazy_dicts'];
+        if (in_array($dictType, $lazyDicts)) {
+            $this->loadDictsByType($withTone, [$dictType]);
+        }
     }
 
     /**
@@ -330,23 +459,307 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     }
 
     /**
-     * 加载自学习字频率数据
+     * 检查和修复自定义字典
+     * @param bool $withTone 是否带声调
+     * @param bool $autoFix 是否自动修复问题
+     * @param bool $verbose 是否显示详细信息
+     * @return array 检查结果
+     */
+    public function checkAndFixCustomDict($withTone = false, $autoFix = false, $verbose = false) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        $this->loadCustomDict($withTone);
+        
+        $results = [
+            'total_entries' => 0,
+            'valid_entries' => 0,
+            'issues_found' => 0,
+            'issues_fixed' => 0,
+            'details' => []
+        ];
+        
+        $customDict = $this->dicts['custom'][$type];
+        $results['total_entries'] = count($customDict);
+        
+        foreach ($customDict as $char => $pinyinArray) {
+            $entryResults = $this->checkCustomDictEntry($char, $pinyinArray, $withTone);
+            
+            if ($entryResults['is_valid']) {
+                $results['valid_entries']++;
+            } else {
+                $results['issues_found']++;
+                
+                if ($autoFix) {
+                    $fixResult = $this->fixCustomDictEntry($char, $pinyinArray, $withTone);
+                    if ($fixResult['fixed']) {
+                        $results['issues_fixed']++;
+                        $entryResults['fix_applied'] = $fixResult['new_pinyin'];
+                    }
+                }
+            }
+            
+            if ($verbose || !$entryResults['is_valid']) {
+                $results['details'][] = $entryResults;
+            }
+        }
+        
+        // 如果进行了修复，保存字典
+        if ($autoFix && $results['issues_fixed'] > 0) {
+            $path = $this->config['dict']['custom'][$type];
+            FileUtil::writeFile($path, "<?php\nreturn " . $this->shortArrayExport($this->dicts['custom'][$type]) . ";\n");
+            $this->initCustomMultiWords();
+        }
+        
+        return $results;
+    }
+    
+    /**
+     * 检查单个自定义字典条目
+     * @param string $char 汉字/词语
+     * @param array $pinyinArray 拼音数组
+     * @param bool $withTone 是否带声调
+     * @return array 检查结果
+     */
+    private function checkCustomDictEntry($char, $pinyinArray, $withTone) {
+        $result = [
+            'char' => $char,
+            'pinyin' => $pinyinArray,
+            'is_valid' => true,
+            'issues' => [],
+            'suggestions' => []
+        ];
+        
+        // 1. 检查字符是否为空
+        if (empty(trim($char))) {
+            $result['is_valid'] = false;
+            $result['issues'][] = '字符为空';
+            $result['suggestions'][] = '删除该条目';
+        }
+        
+        // 2. 检查拼音数组是否为空
+        if (empty($pinyinArray)) {
+            $result['is_valid'] = false;
+            $result['issues'][] = '拼音数组为空';
+            $result['suggestions'][] = '删除该条目或添加有效拼音';
+        }
+        
+        // 3. 检查每个拼音的有效性
+        foreach ($pinyinArray as $index => $pinyin) {
+            $pinyinIssues = $this->validatePinyin($pinyin, $withTone);
+            if (!empty($pinyinIssues)) {
+                $result['is_valid'] = false;
+                $result['issues'] = array_merge($result['issues'], $pinyinIssues);
+                $result['suggestions'][] = "修正第" . ($index + 1) . "个拼音: {$pinyin}";
+            }
+        }
+        
+        // 4. 检查重复定义（在不同字典中）
+        $duplicateSources = $this->checkDuplicateDefinition($char, $withTone);
+        if (!empty($duplicateSources)) {
+            $result['issues'][] = "在其他字典中存在重复定义: " . implode(', ', $duplicateSources);
+            $result['suggestions'][] = '考虑删除自定义定义，使用系统默认拼音';
+        }
+        
+        // 5. 检查拼音格式一致性
+        if (count($pinyinArray) > 1) {
+            $formatConsistency = $this->checkPinyinFormatConsistency($pinyinArray, $withTone);
+            if (!$formatConsistency['consistent']) {
+                $result['is_valid'] = false;
+                $result['issues'][] = '多音字拼音格式不一致';
+                $result['suggestions'][] = '统一拼音格式: ' . implode(' 或 ', $formatConsistency['suggestions']);
+            }
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * 验证单个拼音的有效性
+     * @param string $pinyin 拼音
+     * @param bool $withTone 是否带声调
+     * @return array 问题列表
+     */
+    private function validatePinyin($pinyin, $withTone) {
+        $issues = [];
+        
+        // 检查是否为空
+        if (empty(trim($pinyin))) {
+            $issues[] = '拼音为空';
+            return $issues;
+        }
+        
+        // 检查声调一致性
+        if ($withTone) {
+            // 应该包含声调符号
+            if (!preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
+                $issues[] = '带声调模式下缺少声调符号';
+            }
+        } else {
+            // 不应该包含声调符号
+            if (preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
+                $issues[] = '无声调模式下包含声调符号';
+            }
+        }
+        
+        // 检查拼音格式（基本格式验证）
+        if (!preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ\s]+$/iu', $pinyin)) {
+            $issues[] = '拼音包含非法字符';
+        }
+        
+        // 检查空格使用（单字不应该有空格，多字应该有空格）
+        $wordLen = mb_strlen($pinyin, 'UTF-8');
+        if ($wordLen === 1 && str_contains($pinyin, ' ')) {
+            $issues[] = '单字拼音不应包含空格';
+        }
+        
+        return $issues;
+    }
+    
+    /**
+     * 检查重复定义
+     * @param string $char 汉字/词语
+     * @param bool $withTone 是否带声调
+     * @return array 重复来源列表
+     */
+    private function checkDuplicateDefinition($char, $withTone) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        $duplicateSources = [];
+        
+        // 检查常用字典
+        if ($this->dicts['common'][$type] !== null && isset($this->dicts['common'][$type][$char])) {
+            $duplicateSources[] = '常用字典';
+        }
+        
+        // 检查生僻字字典
+        if ($this->dicts['rare'][$type] !== null && isset($this->dicts['rare'][$type][$char])) {
+            $duplicateSources[] = '生僻字字典';
+        }
+        
+        // 检查自学习字典
+        if ($this->dicts['self_learn'][$type] !== null && isset($this->dicts['self_learn'][$type][$char])) {
+            $duplicateSources[] = '自学习字典';
+        }
+        
+        return $duplicateSources;
+    }
+    
+    /**
+     * 检查拼音格式一致性
+     * @param array $pinyinArray 拼音数组
+     * @param bool $withTone 是否带声调
+     * @return array 一致性检查结果
+     */
+    private function checkPinyinFormatConsistency($pinyinArray, $withTone) {
+        $result = [
+            'consistent' => true,
+            'suggestions' => []
+        ];
+        
+        $firstPinyin = $pinyinArray[0];
+        $firstHasSpace = str_contains($firstPinyin, ' ');
+        
+        foreach ($pinyinArray as $pinyin) {
+            $hasSpace = str_contains($pinyin, ' ');
+            if ($hasSpace !== $firstHasSpace) {
+                $result['consistent'] = false;
+                $result['suggestions'] = array_map(function($p) use ($withTone) {
+                    return $this->normalizePinyinFormat($p, $withTone);
+                }, $pinyinArray);
+                break;
+            }
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * 修复自定义字典条目
+     * @param string $char 汉字/词语
+     * @param array $pinyinArray 拼音数组
+     * @param bool $withTone 是否带声调
+     * @return array 修复结果
+     */
+    private function fixCustomDictEntry($char, $pinyinArray, $withTone) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        $result = ['fixed' => false, 'new_pinyin' => null];
+        
+        // 如果字符为空，删除该条目
+        if (empty(trim($char))) {
+            unset($this->dicts['custom'][$type][$char]);
+            $result['fixed'] = true;
+            return $result;
+        }
+        
+        // 如果拼音数组为空，删除该条目
+        if (empty($pinyinArray)) {
+            unset($this->dicts['custom'][$type][$char]);
+            $result['fixed'] = true;
+            return $result;
+        }
+        
+        // 修复每个拼音
+        $fixedPinyinArray = [];
+        foreach ($pinyinArray as $pinyin) {
+            $fixedPinyin = $this->normalizePinyinFormat($pinyin, $withTone);
+            if (!empty(trim($fixedPinyin))) {
+                $fixedPinyinArray[] = $fixedPinyin;
+            }
+        }
+        
+        // 如果修复后仍有有效拼音，更新字典
+        if (!empty($fixedPinyinArray)) {
+            $this->dicts['custom'][$type][$char] = $fixedPinyinArray;
+            $result['fixed'] = true;
+            $result['new_pinyin'] = $fixedPinyinArray;
+        } else {
+            // 如果没有有效拼音，删除该条目
+            unset($this->dicts['custom'][$type][$char]);
+            $result['fixed'] = true;
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * 标准化拼音格式
+     * @param string $pinyin 拼音
+     * @param bool $withTone 是否带声调
+     * @return string 标准化后的拼音
+     */
+    private function normalizePinyinFormat($pinyin, $withTone) {
+        $pinyin = trim($pinyin);
+        
+        // 移除非法字符
+        $pinyin = preg_replace('/[^a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ\s]/iu', '', $pinyin);
+        
+        // 处理声调
+        if (!$withTone) {
+            $pinyin = $this->removeTone($pinyin);
+        }
+        
+        // 标准化空格（多个空格合并为一个）
+        $pinyin = preg_replace('/\s+/', ' ', $pinyin);
+        
+        return $pinyin;
+    }
+
+    /**
+     * 加载字词频率数据
      */
     private function loadSelfLearnFrequency() {
         if ($this->dicts['self_learn_frequency'] !== null) {
             return;
         }
-        $path = $this->config['dict']['self_learn']['frequency'];
+        $path = $this->config['dict']['frequency'];
         $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
         $this->dicts['self_learn_frequency'] = is_array($data) ? $data : [];
         $this->charFrequency = $this->dicts['self_learn_frequency'];
     }
 
     /**
-     * 保存自学习字频率数据
+     * 保存字词频率数据
      */
     private function saveSelfLearnFrequency() {
-        $path = $this->config['dict']['self_learn']['frequency'];
+        $path = $this->config['dict']['frequency'];
         FileUtil::writeFile($path, "<?php\nreturn " . $this->shortArrayExport($this->charFrequency) . ";\n");
         $this->dicts['self_learn_frequency'] = $this->charFrequency;
     }
@@ -417,6 +830,10 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     private function checkMergeNeed() {
         $needMerge = [];
         foreach (['with_tone', 'no_tone'] as $toneType) {
+            // 确保字典已加载
+            if ($this->dicts['self_learn'][$toneType] === null) {
+                $this->loadSelfLearnDict($toneType === 'with_tone');
+            }
             $selfLearnCount = count($this->dicts['self_learn'][$toneType]);
             if ($selfLearnCount >= $this->config['self_learn_merge']['threshold'] && $this->canMerge($toneType)) {
                 $needMerge[$toneType] = true;
@@ -482,6 +899,9 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             if (!isset($commonData[$char])) {
                 $commonData[$char] = $selfLearnData[$char];
                 $mergedChars[] = $char;
+                
+                // 同步更新另一个声调类型的字典
+                $this->syncToOtherToneType($char, $toneType);
             }
         }
 
@@ -491,6 +911,221 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
 
         FileUtil::writeFile($commonPath, "<?php\nreturn " . $this->shortArrayExport($commonData) . ";\n");
         $this->dicts['common'][$toneType] = $commonData;
+    }
+    
+    /**
+     * 同步更新另一个声调类型的字典
+     * @param string $char 汉字
+     * @param string $sourceToneType 源声调类型
+     */
+    private function syncToOtherToneType($char, $sourceToneType) {
+        $targetToneType = $sourceToneType === 'with_tone' ? 'no_tone' : 'with_tone';
+        
+        // 检查目标字典中是否已存在该字符
+        $targetCommonPath = $this->config['dict']['common'][$targetToneType];
+        $targetCommonData = FileUtil::requireFile($targetCommonPath);
+        $targetCommonData = $this->formatPinyinArray($targetCommonData);
+        
+        if (isset($targetCommonData[$char])) {
+            return; // 目标字典中已存在，无需同步
+        }
+        
+        // 从源字典获取拼音并转换为目标声调类型
+        $sourcePinyin = $this->dicts['self_learn'][$sourceToneType][$char] ?? null;
+        if (!$sourcePinyin) {
+            return; // 源字典中没有该字符的拼音
+        }
+        
+        // 转换拼音到目标声调类型
+        $targetPinyin = $this->convertPinyinTone($sourcePinyin, $sourceToneType, $targetToneType, $char);
+        
+        if (!empty($targetPinyin)) {
+            // 添加到目标字典
+            $targetCommonData[$char] = $targetPinyin;
+            
+            // 保存目标字典
+            FileUtil::writeFile($targetCommonPath, "<?php\nreturn " . $this->shortArrayExport($targetCommonData) . ";\n");
+            $this->dicts['common'][$targetToneType] = $targetCommonData;
+        }
+    }
+    
+
+    
+    /**
+     * 查找带声调的拼音
+     * @param string $char 汉字
+     * @param string $noTonePinyin 无声调拼音
+     * @return string|null 带声调的拼音
+     */
+    private function findPinyinWithTone($char, $noTonePinyin) {
+        // 1. 首先尝试从常用字典查找
+        if ($this->dicts['common']['with_tone'] !== null) {
+            foreach ($this->dicts['common']['with_tone'] as $commonChar => $pinyinArray) {
+                if ($commonChar === $char) {
+                    foreach ($pinyinArray as $pinyin) {
+                        $noToneVersion = $this->removeTone($pinyin);
+                        if ($noToneVersion === $noTonePinyin) {
+                            return $pinyin; // 找到匹配的带声调拼音
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 2. 尝试从生僻字字典查找
+        if ($this->dicts['rare']['with_tone'] !== null) {
+            foreach ($this->dicts['rare']['with_tone'] as $rareChar => $pinyinArray) {
+                if ($rareChar === $char) {
+                    foreach ($pinyinArray as $pinyin) {
+                        $noToneVersion = $this->removeTone($pinyin);
+                        if ($noToneVersion === $noTonePinyin) {
+                            return $pinyin;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 3. 尝试从Unihan字典查询（如果可用）
+        $unihanPinyin = $this->queryUnihanForPinyin($char);
+        if ($unihanPinyin) {
+            $noToneVersion = $this->removeTone($unihanPinyin);
+            if ($noToneVersion === $noTonePinyin) {
+                return $unihanPinyin;
+            }
+        }
+        
+        // 4. 使用拼音声调规则库（如果可用）
+        $ruleBasedPinyin = $this->applyPinyinToneRules($char, $noTonePinyin);
+        if ($ruleBasedPinyin) {
+            return $ruleBasedPinyin;
+        }
+        
+        // 5. 如果都找不到，返回null表示需要人工干预
+        return null;
+    }
+    
+    /**
+     * 从Unihan字典查询拼音
+     * @param string $char 汉字
+     * @return string|null 带声调的拼音
+     */
+    private function queryUnihanForPinyin($char) {
+        // 检查Unihan字典文件是否存在
+        $unihanFiles = [
+            __DIR__.'/../data/unihan/all_unihan_pinyin.php'
+        ];
+        
+        foreach ($unihanFiles as $file) {
+            if (FileUtil::fileExists($file)) {
+                $unihanData = FileUtil::requireFile($file);
+                if (isset($unihanData[$char])) {
+                    $pinyin = is_array($unihanData[$char]) ? $unihanData[$char][0] : $unihanData[$char];
+                    return $pinyin;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 应用拼音声调规则
+     * @param string $char 汉字
+     * @param string $noTonePinyin 无声调拼音
+     * @return string|null 带声调的拼音
+     */
+    private function applyPinyinToneRules($char, $noTonePinyin) {
+        // 这里可以添加拼音声调规则库
+        // 例如：基于汉字部首、笔画数、常见读音等规则
+        
+        // 简单的规则：基于常见多音字的默认声调
+        $commonToneRules = [
+            '行' => ['xíng', 'háng'],
+            '长' => ['cháng', 'zhǎng'],
+            '乐' => ['lè', 'yuè'],
+            '重' => ['zhòng', 'chóng'],
+            '中' => ['zhōng', 'zhòng'],
+            '为' => ['wéi', 'wèi'],
+            '和' => ['hé', 'hè', 'huó', 'huò'],
+            '着' => ['zhe', 'zháo', 'zhuó'],
+            '了' => ['le', 'liǎo'],
+            '得' => ['de', 'dé', 'děi']
+        ];
+        
+        if (isset($commonToneRules[$char])) {
+            foreach ($commonToneRules[$char] as $withTonePinyin) {
+                if ($this->removeTone($withTonePinyin) === $noTonePinyin) {
+                    return $withTonePinyin;
+                }
+            }
+        }
+        
+        // 更复杂的规则：基于拼音音节和常见声调分布
+        return $this->applyStatisticalToneRules($char, $noTonePinyin);
+    }
+    
+    /**
+     * 应用统计声调规则
+     * @param string $char 汉字
+     * @param string $noTonePinyin 无声调拼音
+     * @return string|null 带声调的拼音
+     */
+    private function applyStatisticalToneRules($char, $noTonePinyin) {
+        // 基于汉字使用频率和声调分布的统计规则
+        // 这里可以扩展为更复杂的机器学习模型
+        
+        // 简单的统计：为每个无声调拼音分配最常见的声调
+        $commonToneDistribution = [
+            'a' => 'ā', 'o' => 'ō', 'e' => 'ē', 'i' => 'ī', 'u' => 'ū', 'v' => 'ǖ',
+            'ai' => 'āi', 'ei' => 'ēi', 'ao' => 'āo', 'ou' => 'ōu',
+            'an' => 'ān', 'en' => 'ēn', 'ang' => 'āng', 'eng' => 'ēng',
+            'er' => 'ēr', 'yi' => 'yī', 'wu' => 'wū', 'yu' => 'yū'
+        ];
+        
+        // 尝试为无声调拼音添加最常见的声调
+        foreach ($commonToneDistribution as $noTone => $withTone) {
+            if ($noTonePinyin === $noTone) {
+                return $withTone;
+            }
+        }
+        
+        // 如果无法确定，返回null
+        return null;
+    }
+    
+    /**
+     * 改进的拼音声调转换方法
+     * @param array $sourcePinyin 源拼音数组
+     * @param string $sourceToneType 源声调类型
+     * @param string $targetToneType 目标声调类型
+     * @param string $char 汉字（用于查找正确的声调）
+     * @return array 转换后的拼音数组
+     */
+    private function convertPinyinTone($sourcePinyin, $sourceToneType, $targetToneType, $char) {
+        if ($sourceToneType === $targetToneType) {
+            return $sourcePinyin; // 相同类型，无需转换
+        }
+        
+        $convertedPinyin = [];
+        foreach ($sourcePinyin as $pinyin) {
+            if ($sourceToneType === 'with_tone' && $targetToneType === 'no_tone') {
+                // 带声调转无声调：去除声调符号（简单可靠）
+                $convertedPinyin[] = $this->removeTone($pinyin);
+            } else if ($sourceToneType === 'no_tone' && $targetToneType === 'with_tone') {
+                // 无声调转带声调：需要复杂的查找逻辑
+                $withTonePinyin = $this->findPinyinWithTone($char, $pinyin);
+                if ($withTonePinyin) {
+                    $convertedPinyin[] = $withTonePinyin;
+                } else {
+                    // 如果找不到正确的声调，记录日志并保留无声调版本
+                    error_log("[PinyinConverter] 无法为汉字 '{$char}' 找到正确的声调，拼音: {$pinyin}");
+                    $convertedPinyin[] = $pinyin; // 保留原拼音，可能需要人工干预
+                }
+            }
+        }
+        
+        return array_unique($convertedPinyin);
     }
 
     /**
@@ -572,7 +1207,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         $charCount = count($commonData);
         
         foreach ($commonData as $char => $pinyin) {
-            $freq = $this->charFrequency[$toneType][$char] ?? 0;
+            $freq = $this->charFrequency[$char] ?? 0;
             $totalFrequency += $freq;
         }
         
@@ -581,7 +1216,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         // 迁移频率低于平均值的字符到生僻字字典
         $migratedChars = [];
         foreach ($commonData as $char => $pinyin) {
-            $freq = $this->charFrequency[$toneType][$char] ?? 0;
+            $freq = $this->charFrequency[$char] ?? 0;
             if ($freq < $averageFrequency * 0.5) { // 低于平均值50%的字符
                 $rareData[$char] = $pinyin;
                 $migratedChars[] = $char;
@@ -736,7 +1371,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             return $this->cleanPinyin($tempMap[$char], true);
         }
 
-        // 多音字规则检查 - 第二优先级
+        // 多音字规则检查 - 第二优先级（基于上下文的智能选择）
         $this->loadPolyphoneRules();
         
         if (isset($this->dicts['polyphone_rules'][$char])) {
@@ -756,7 +1391,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
 
         // 自定义字典（区分单字/多字）- 第三优先级
         if ($this->dicts['custom'][$type] === null) {
-            $this->loadCustomDict($withTone);
+            $this->lazyLoadDict('custom', $withTone);
         }
         
         if (isset($this->dicts['custom'][$type][$char])) {
@@ -805,16 +1440,27 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     private function getAllPinyinOptions($char, $withTone) {
         $type = $withTone ? 'with_tone' : 'no_tone';
 
-        // 1. 自学习字典
-        if ($this->dicts['self_learn'][$type] === null) {
-            $this->loadSelfLearnDict($withTone);
+        // 1. 自定义字典 - 最高优先级
+        if ($this->dicts['custom'][$type] === null) {
+            $this->lazyLoadDict('custom', $withTone);
         }
-        if (isset($this->dicts['self_learn'][$type][$char])) {
-            $pinyin = $this->dicts['self_learn'][$type][$char];
+        if (isset($this->dicts['custom'][$type][$char])) {
+            $pinyin = $this->dicts['custom'][$type][$char];
             return $this->parsePinyinOptions($pinyin);
         }
 
-        // 2. 常用字典
+        // 2. 多音字规则检查
+        $this->loadPolyphoneRules();
+        if (isset($this->dicts['polyphone_rules'][$char])) {
+            // 先获取其他字典的拼音选项用于规则匹配
+            $otherPinyinOptions = $this->getOtherPinyinOptions($char, $withTone);
+            $matchedPinyin = $this->matchPolyphoneRule($char, $otherPinyinOptions, [], $withTone);
+            if ($matchedPinyin !== null) {
+                return [$matchedPinyin];
+            }
+        }
+
+        // 3. 常用字典
         if ($this->dicts['common'][$type] === null) {
             $this->loadCommonDict($withTone);
         }
@@ -823,25 +1469,72 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             return $this->parsePinyinOptions($pinyin);
         }
 
-        // 3. 生僻字字典（并自动增加到自学习字典）
+        // 4. 生僻字字典（并记录到自学习字典）- 懒加载
         if ($this->dicts['rare'][$type] === null) {
-            $this->loadRareDict($withTone);
+            $this->lazyLoadDict('rare', $withTone);
         }
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
-            $this->learnChar($char, $rawPinyin, $withTone);
+            // 记录生僻字到自学习字典（但不立即加载自学习字典）
+            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone);
             return $this->parsePinyinOptions($rawPinyin);
         }
 
-        // 4. 基础映射表（作为最后的兜底）
+        // 5. 自学习字典（仅在后台合并任务后使用，避免重复查询）
+        // 注意：自学习字典的数据来源于生僻字字典，在未合并之前是重复的
+        // 因此这里不需要查询自学习字典，避免重复加载
+
+        // 6. 基础映射表（作为最后的兜底）
         if (isset($this->basicPinyinMap[$char])) {
             return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
         }
 
-        // 5. 在所有字典中都找不到的字符，保存到未找到字符文件
+        // 7. 在所有字典中都找不到的字符，保存到未找到字符文件
         $this->saveNotFoundChar($char);
 
         return [$char];
+    }
+
+    /**
+     * 获取除自定义字典外的其他拼音选项（用于多音字规则匹配）
+     * @param string $char 汉字
+     * @param bool $withTone 是否带声调
+     * @return array 拼音数组
+     */
+    private function getOtherPinyinOptions($char, $withTone) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        $options = [];
+
+        // 自学习字典
+        if ($this->dicts['self_learn'][$type] === null) {
+            $this->loadSelfLearnDict($withTone);
+        }
+        if (isset($this->dicts['self_learn'][$type][$char])) {
+            $options = array_merge($options, $this->parsePinyinOptions($this->dicts['self_learn'][$type][$char]));
+        }
+
+        // 常用字典
+        if ($this->dicts['common'][$type] === null) {
+            $this->loadCommonDict($withTone);
+        }
+        if (isset($this->dicts['common'][$type][$char])) {
+            $options = array_merge($options, $this->parsePinyinOptions($this->dicts['common'][$type][$char]));
+        }
+
+        // 生僻字字典
+        if ($this->dicts['rare'][$type] === null) {
+            $this->lazyLoadDict('rare', $withTone);
+        }
+        if (isset($this->dicts['rare'][$type][$char])) {
+            $options = array_merge($options, $this->parsePinyinOptions($this->dicts['rare'][$type][$char]));
+        }
+
+        // 基础映射表
+        if (isset($this->basicPinyinMap[$char])) {
+            $options[] = $withTone ? $this->basicPinyinMap[$char][0] : $this->basicPinyinMap[$char][1];
+        }
+
+        return array_unique($options);
     }
 
     /**
@@ -939,6 +1632,148 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         $this->learnedChars[$type][$char] = $pinyinArray;
         $this->dicts['self_learn'][$type][$char] = $pinyinArray;
         $this->charFrequency[$type][$char] = 0;
+        
+        // 记录自学习来源：从生僻字字典学习
+        $this->logSelfLearnSource($char, 'rare', $type);
+    }
+    
+    /**
+     * 记录自学习字典的数据来源
+     * @param string $char 汉字
+     * @param string $sourceType 来源类型（'rare' 表示来自生僻字字典）
+     * @param string $toneType 声调类型
+     */
+    private function logSelfLearnSource($char, $sourceType, $toneType) {
+        $sourceLogFile = $this->config['dict']['backup'] . '/self_learn_sources.json';
+        $sources = [];
+        
+        if (FileUtil::fileExists($sourceLogFile)) {
+            $content = FileUtil::readFile($sourceLogFile);
+            $sources = json_decode($content, true) ?: [];
+        }
+        
+        $key = $char . '_' . $toneType;
+        if (!isset($sources[$key])) {
+            $sources[$key] = [
+                'char' => $char,
+                'tone_type' => $toneType,
+                'source' => $sourceType,
+                'learned_at' => date('Y-m-d H:i:s'),
+                'frequency' => 0
+            ];
+        }
+        
+        FileUtil::writeFile($sourceLogFile, json_encode($sources, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    }
+    
+    /**
+     * 将生僻字动态迁移到自学习字典
+     * @param string $char 汉字
+     * @param array|string $rawPinyin 拼音
+     * @param bool $withTone 是否带声调
+     */
+    private function migrateRareToSelfLearn($char, $rawPinyin, $withTone) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        
+        // 检查是否已经在自学习字典中
+        if (isset($this->dicts['self_learn'][$type][$char]) || isset($this->learnedChars[$type][$char])) {
+            return;
+        }
+        
+        // 将生僻字添加到自学习字典
+        $pinyinArray = is_array($rawPinyin) ? $rawPinyin : [$rawPinyin];
+        if (!$withTone) {
+            $pinyinArray = array_map([$this, 'removeTone'], $pinyinArray);
+        }
+        
+        $this->learnedChars[$type][$char] = $pinyinArray;
+        $this->dicts['self_learn'][$type][$char] = $pinyinArray;
+        $this->charFrequency[$char] = 1; // 初始频率设为1
+        
+        // 记录来源
+        $this->logSelfLearnSource($char, 'rare', $type);
+        
+        // 检查是否需要立即合并到常用字典（高频生僻字）
+        $this->checkImmediateMerge($char, $type);
+    }
+    
+    /**
+     * 检查是否需要立即合并到常用字典
+     * @param string $char 汉字
+     * @param string $type 声调类型
+     */
+    private function checkImmediateMerge($char, $type) {
+        // 如果字符使用频率达到阈值，立即合并到常用字典
+        $frequencyThreshold = $this->config['self_learn_merge']['immediate_threshold'] ?? 10;
+        
+        $currentFrequency = $this->charFrequency[$char] ?? 0;
+        if ($currentFrequency >= $frequencyThreshold) {
+            $this->immediateMergeToCommon($char, $type);
+        }
+    }
+    
+    /**
+     * 立即将高频自学习字合并到常用字典
+     * @param string $char 汉字
+     * @param string $type 声调类型
+     */
+    private function immediateMergeToCommon($char, $type) {
+        if (!isset($this->dicts['self_learn'][$type][$char])) {
+            return;
+        }
+        
+        // 备份字典
+        $this->backupDict('common', $type);
+        $this->backupDict('self_learn', $type);
+        
+        // 加载常用字典
+        $commonPath = $this->config['dict']['common'][$type];
+        $commonData = FileUtil::requireFile($commonPath);
+        $commonData = $this->formatPinyinArray($commonData);
+        
+        // 如果常用字典中还没有这个字，就添加进去
+        if (!isset($commonData[$char])) {
+            $commonData[$char] = $this->dicts['self_learn'][$type][$char];
+            
+            // 保存更新后的常用字典
+            FileUtil::writeFile($commonPath, "<?php\nreturn " . $this->shortArrayExport($commonData) . ";\n");
+            $this->dicts['common'][$type] = $commonData;
+            
+            // 从自学习字典中移除
+            unset($this->dicts['self_learn'][$type][$char]);
+            unset($this->learnedChars[$type][$char]);
+            
+            // 保存更新后的自学习字典
+            $selfLearnPath = $this->config['dict']['self_learn'][$type];
+            FileUtil::writeFile($selfLearnPath, "<?php\nreturn " . $this->shortArrayExport($this->dicts['self_learn'][$type]) . ";\n");
+            
+            // 记录合并日志
+            $this->logImmediateMerge($char, $type);
+        }
+    }
+    
+    /**
+     * 记录立即合并日志
+     * @param string $char 汉字
+     * @param string $type 声调类型
+     */
+    private function logImmediateMerge($char, $type) {
+        $mergeLogFile = $this->config['dict']['backup'] . '/immediate_merge_log.json';
+        $log = [];
+        
+        if (FileUtil::fileExists($mergeLogFile)) {
+            $content = FileUtil::readFile($mergeLogFile);
+            $log = json_decode($content, true) ?: [];
+        }
+        
+        $log[] = [
+            'char' => $char,
+            'tone_type' => $type,
+            'merged_at' => date('Y-m-d H:i:s'),
+            'frequency' => $this->charFrequency[$type][$char] ?? 0
+        ];
+        
+        FileUtil::writeFile($mergeLogFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -950,7 +1785,8 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         // 确保频率数据已加载
         $this->loadSelfLearnFrequency();
         
-        // 更新频率计数（统计所有转换的字词，不区分声调类型）
+        // 统计所有字和词语的使用频率，不区分声调
+        // key为字或词本身，value为调用次数
         if (!isset($this->charFrequency[$char])) {
             $this->charFrequency[$char] = 0;
         }
@@ -1128,38 +1964,38 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             if (in_array($word, $processedWords)) continue;
             
             // 检查文本中是否包含该词语
-                if (strpos($result, $word) !== false) {
-                    $pinyin = $this->getFirstPinyin($item['pinyin']);
-                    // 将拼音中的空格替换为实际分隔符
-                    $processedPinyin = str_replace(' ', $separator, $pinyin);
-                    // 使用特殊标记来保护拼音字符串不被后续处理拆分
-                    $protectedPinyin = "[[CUSTOM_PINYIN:{$processedPinyin}]]";
-                    
-                    // 优化：使用一个正则表达式处理所有边界情况
-                    $result = preg_replace_callback(
-                        '/([a-zA-Z0-9]?)(' . preg_quote($word, '/') . ')([a-zA-Z0-9]?)/u',
-                        function($matches) use ($separator, $protectedPinyin) {
-                            $before = $matches[1];
-                            $after = $matches[3];
-                            
-                            if ($before && $after) {
-                                return $before . $separator . $protectedPinyin . $separator . $after;
-                            } elseif ($before) {
-                                return $before . $separator . $protectedPinyin;
-                            } elseif ($after) {
-                                return $protectedPinyin . $separator . $after;
-                            } else {
-                                return $protectedPinyin;
-                            }
-                        },
-                        $result
-                    );
-                    
-                    // 记录自定义词语的使用频率
-                    $this->updateCharFrequency($word, $type);
-                    
-                    $processedWords[] = $word;
-                }
+            if (strpos($result, $word) !== false) {
+                $pinyin = $this->getFirstPinyin($item['pinyin']);
+                // 将拼音中的空格替换为实际分隔符
+                $processedPinyin = str_replace(' ', $separator, $pinyin);
+                // 使用特殊标记来保护拼音字符串不被后续处理拆分
+                $protectedPinyin = "[[CUSTOM_PINYIN:{$processedPinyin}]]";
+                
+                // 优化：使用一个正则表达式处理所有边界情况
+                $result = preg_replace_callback(
+                    '/([a-zA-Z0-9]?)(' . preg_quote($word, '/') . ')([a-zA-Z0-9]?)/u',
+                    function($matches) use ($separator, $protectedPinyin) {
+                        $before = $matches[1];
+                        $after = $matches[3];
+                        
+                        if ($before && $after) {
+                            return $before . $separator . $protectedPinyin . $separator . $after;
+                        } elseif ($before) {
+                            return $before . $separator . $protectedPinyin;
+                        } elseif ($after) {
+                            return $protectedPinyin . $separator . $after;
+                        } else {
+                            return $protectedPinyin;
+                        }
+                    },
+                    $result
+                );
+                
+                // 记录自定义词语的使用频率
+                $this->updateCharFrequency($word, $type);
+                
+                $processedWords[] = $word;
+            }
         }
 
         return [$result, $processedWords];
