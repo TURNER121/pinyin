@@ -20,7 +20,8 @@
   ],
   "autoload": {
     "psr-4": {
-      "tekintian\\pinyin\\": "src/"
+      "tekintian\\pinyin\\": "src/",
+      "tekintian\\pinyin\\unicode\\": "unicode/"
     }
   },
   "autoload-dev": {
