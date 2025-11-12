@@ -259,7 +259,7 @@ class FileUtil
      * @param string $file 文件路径
      * @return int|null 文件修改时间戳，如果文件不存在则返回null
      */
-    public static function getFileMTime(string $file): ?int
+    public static function getFileMTime($file)
     {
         if (!is_file($file)) {
             return null;

@@ -28,6 +28,6 @@ interface ConverterInterface
      * @param string $separator 分隔符
      * @return string URL Slug
      */
-    public function getUrlSlug(string $text, string $separator = '-'): string;
+    public function getUrlSlug($text, $separator = '-');
     
 }

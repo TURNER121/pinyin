@@ -23,7 +23,7 @@ class PinyinException extends Exception
      * @param int $code 错误代码
      * @param Exception|null $previous 前一个异常
      */
-    public function __construct(string $message, int $code = self::ERROR_UNKNOWN, Exception $previous = null)
+    public function __construct($message, $code = self::ERROR_UNKNOWN, Exception $previous = null)
     {
         parent::__construct($message, $code, $previous);
     }
