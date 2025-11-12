@@ -1,0 +1,7 @@
+!.gitignore
+!.gitkeep
+
+self_learn_no_tone.php
+self_learn_with_tone.php
+metadata.json
+char_frequency.php
