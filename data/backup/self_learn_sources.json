@@ -26,5 +26,12 @@
         "source": "rare",
         "learned_at": "2025-11-12 03:47:40",
         "frequency": 0
+    },
+    "䶮_with_tone": {
+        "char": "䶮",
+        "tone_type": "with_tone",
+        "source": "rare",
+        "learned_at": "2025-11-12 08:57:36",
+        "frequency": 0
     }
 }
