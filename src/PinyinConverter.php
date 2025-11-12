@@ -1480,7 +1480,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
-            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone);
+            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone, 'rare');
             return $this->parsePinyinOptions($rawPinyin);
         }
 
@@ -1492,11 +1492,9 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         if (isset($this->dicts['unihan'][$type][$char])) {
             $rawPinyin = $this->dicts['unihan'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
-            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone);
+            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone, 'unihan');
             return $this->parsePinyinOptions($rawPinyin);
         }
-        
-
         // 6. 基础映射表（作为最后的兜底）
         if (isset($this->basicPinyinMap[$char])) {
             return $withTone ? [$this->basicPinyinMap[$char][0]] : [$this->basicPinyinMap[$char][1]];
@@ -1685,7 +1683,7 @@ return $rulePinyin;
      * @param array|string $rawPinyin 拼音
      * @param bool $withTone 是否带声调
      */
-    private function migrateRareToSelfLearn($char, $rawPinyin, $withTone) {
+    private function migrateRareToSelfLearn($char, $rawPinyin, $withTone, $sourceType='rare') {
         $type = $withTone ? 'with_tone' : 'no_tone';
         
         // 检查是否已经在自学习字典中
@@ -1704,7 +1702,7 @@ return $rulePinyin;
         $this->charFrequency[$char] = 1; // 初始频率设为1
         
         // 记录来源
-        $this->logSelfLearnSource($char, 'rare', $type);
+        $this->logSelfLearnSource($char, $sourceType, $type);
         
         // 检查是否需要立即合并到常用字典（高频生僻字）
         $this->checkImmediateMerge($char, $type);
