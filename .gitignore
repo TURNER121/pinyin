@@ -55,3 +55,4 @@ Thumbs.db
 # Custom
 \#src/
 /pinyin.sublime-workspace
+/data/char_frequency.php
