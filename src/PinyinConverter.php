@@ -1932,14 +1932,14 @@ return $rulePinyin;
         }
     
         // 以下为 delete/keep 模式的逻辑（不变）
-        $blockedChars = ['%', '~', '!', '^', '&', '*', '`', '|', '\\', '{', '}', '<', '>', '【', '】', '、', '。', '，', '；', '：', '"', '"', '‘', '’', '（', '）'];
-        if (in_array($char, $blockedChars)) {
-            return '';
-        }
+        // $blockedChars = ['%', '~', '!', '^', '&', '*', '`', '|', '\\', '{', '}', '<', '>', '【', '】', '、', '。', '，', '；', '：', '"', '"', '‘', '’', '（', '）'];
+        // if (in_array($char, $blockedChars)) {
+        //     return '';
+        // }
     
-        if (ord($char) < 32 || ord($char) > 126) {
-            return '';
-        }
+        // if (ord($char) < 32 || ord($char) > 126) {
+        //     return '';
+        // }
     
         switch ($mode) {
             case 'delete':
