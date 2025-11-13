@@ -296,8 +296,8 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             // 懒加载模式：只预加载常用字典
             $this->loadDictsByStrategy($strategy, $preloadPriority);
         } else {
-            // 全量加载模式：加载所有字典类型
-            $this->loadDictsByStrategy($strategy, ['custom', 'common', 'rare', 'unihan', 'self_learn']);
+            // 全量加载模式：加载所有字典类型（排除self_learn）
+            $this->loadDictsByStrategy($strategy, ['custom', 'common', 'rare', 'unihan']);
         }
         
         // 异步检查字典迁移需求（不阻塞主流程）
@@ -345,16 +345,18 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
      */
     private function checkAndExecuteMigration() {
         // 在测试环境中禁用字典迁移
-        if (defined('PHPUNIT_RUNNING') || php_sapi_name() === 'cli') {
+        if (defined('PHPUNIT_RUNNING') || php_sapi_name() === 'cli' || getenv('APP_ENV') === 'testing') {
             return;
         }
         
-        // 检查是否需要迁移（例如：每天执行一次）
+        // 检查是否需要迁移
         $lastMigrationTime = $this->getLastMigrationTime();
         $currentTime = time();
         
-        // 24小时执行一次迁移
-        if (($currentTime - $lastMigrationTime) >= 86400) {
+        // 动态迁移频率：根据系统负载调整（24小时到72小时）
+        $migrationFrequency = $this->getDynamicMigrationFrequency();
+        
+        if (($currentTime - $lastMigrationTime) >= $migrationFrequency) {
             foreach (['with_tone', 'no_tone'] as $toneType) {
                 $this->migrateLowFrequencyChars($toneType);
             }
@@ -1232,6 +1234,29 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     }
 
     /**
+     * 获取动态迁移频率
+     * @return int 迁移频率（秒）
+     */
+    private function getDynamicMigrationFrequency() {
+        // 使用配置中的频率限制作为基础频率
+        $baseFrequency = $this->config['self_learn_merge']['frequency_limit'] ?? 86400;
+        
+        // 根据系统负载调整频率
+        if (function_exists('sys_getloadavg')) {
+            $load = sys_getloadavg()[0] ?? 0;
+            if ($load > 2.0) {
+                // 高负载时延长到基础频率的3倍
+                return $baseFrequency * 3;
+            } elseif ($load > 1.0) {
+                // 中等负载时延长到基础频率的2倍
+                return $baseFrequency * 2;
+            }
+        }
+        
+        return $baseFrequency;
+    }
+    
+    /**
      * 迁移常用字典中调用频率低的字符到生僻字字典
      * @param string $toneType 声调类型
      */
@@ -1239,7 +1264,6 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         $commonPath = $this->config['dict']['common'][$toneType];
         $commonData = FileUtil::requireFile($commonPath);
   
-        
         $rarePath = $this->config['dict']['rare'][$toneType];
         $rareData = FileUtil::fileExists($rarePath) ? FileUtil::requireFile($rarePath) : [];
         
@@ -1254,11 +1278,15 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         
         $averageFrequency = $charCount > 0 ? $totalFrequency / $charCount : 0;
         
-        // 迁移频率低于平均值的字符到生僻字字典
+        // 迁移频率低于平均值的字符到生僻字字典（使用配置化的阈值）
         $migratedChars = [];
+        $migrationThreshold = $this->config['self_learn_merge']['migration_threshold'] ?? 0.3;
+        $minFrequency = $this->config['self_learn_merge']['min_migration_frequency'] ?? 10;
+        
         foreach ($commonData as $char => $pinyin) {
             $freq = $this->charFrequency[$char] ?? 0;
-            if ($freq < $averageFrequency * 0.5) { // 低于平均值50%的字符
+            // 使用配置化的阈值：低于平均值一定比例且频率小于最小迁移频率的字符才迁移
+            if ($freq < $averageFrequency * $migrationThreshold && $freq < $minFrequency) {
                 $rareData[$char] = $pinyin;
                 $migratedChars[] = $char;
             }
@@ -1277,7 +1305,34 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             // 更新内存中的字典数据
             $this->dicts['common'][$toneType] = $commonData;
             $this->dicts['rare'][$toneType] = $rareData;
+            
+            // 记录迁移日志
+            $this->logMigration($migratedChars, $toneType);
         }
+    }
+    
+    /**
+     * 记录迁移日志
+     * @param array $migratedChars 迁移的字符
+     * @param string $toneType 声调类型
+     */
+    private function logMigration($migratedChars, $toneType) {
+        $logFile = $this->config['dict']['backup'] . '/migration_log.json';
+        $log = [];
+        
+        if (FileUtil::fileExists($logFile)) {
+            $content = FileUtil::readFile($logFile);
+            $log = json_decode($content, true) ?: [];
+        }
+        
+        $log[] = [
+            'timestamp' => time(),
+            'tone_type' => $toneType,
+            'migrated_chars' => $migratedChars,
+            'migrated_count' => count($migratedChars)
+        ];
+        
+        FileUtil::writeFile($logFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -2327,11 +2382,15 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         
         $hitRate = $totalAccesses > 0 ? ($recentAccesses / $totalAccesses) * 100 : 0;
         
+        // 使用配置化的缓存效率阈值
+        $highThreshold = $this->config['high_freq_cache']['efficiency_high'] ?? 70;
+        $mediumThreshold = $this->config['high_freq_cache']['efficiency_medium'] ?? 40;
+        
         return [
             'total_entries' => count($this->cache),
             'recent_hit_rate' => round($hitRate, 2),
             'cache_size_limit' => $this->config['high_freq_cache']['size'],
-            'efficiency_level' => $hitRate > 70 ? 'high' : ($hitRate > 40 ? 'medium' : 'low')
+            'efficiency_level' => $hitRate > $highThreshold ? 'high' : ($hitRate > $mediumThreshold ? 'medium' : 'low')
         ];
     }
     
@@ -2503,7 +2562,8 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
                             }
                         } else {
                             $similarity = PinyinHelper::pinyinSimilarity($normalizedOption, $searchPinyin);
-                            if ($similarity > 0.7) {
+                            $similarityThreshold = $this->config['search']['similarity_threshold'] ?? 0.7;
+                            if ($similarity > $similarityThreshold) {
                                 $results[] = ['char' => $char, 'similarity' => $similarity];
                                 break;
                             }
