@@ -141,10 +141,16 @@ class PinyinConverter implements ConverterInterface {
     private $lastMergeTime = [];
 
     /**
-     * 高频转换结果缓存
+     * 高频转换结果缓存（LRU实现）
      * @var array
      */
     private $cache = [];
+    
+    /**
+     * 缓存访问时间记录（用于LRU淘汰）
+     * @var array
+     */
+    private $cacheAccessTime = [];
 
     /**
      * 频率数据是否已修改（需要在析构函数中保存）
@@ -285,17 +291,31 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         // 加载自学习频率（总是需要）
         $this->loadFrequency();
         
-        // 检查是否需要执行字典迁移（低频字符从常用字典迁移到生僻字字典）
-        // 注意：迁移操作会修改字典文件，需要谨慎处理，建议在定时任务中执行
-        // $this->checkAndExecuteMigration();
-        
         // 根据懒加载配置决定加载策略
         if ($lazyLoading) {
             // 懒加载模式：只预加载常用字典
             $this->loadDictsByStrategy($strategy, $preloadPriority);
         } else {
-            // 全量加载模式：加载所有字典（不包括self_learn，因为它在未合并前已包含在rare字典内）
-            $this->loadDictsByStrategy($strategy, ['common', 'rare', 'custom']);
+            // 全量加载模式：加载所有字典类型
+            $this->loadDictsByStrategy($strategy, ['custom', 'common', 'rare', 'unihan', 'self_learn']);
+        }
+        
+        // 异步检查字典迁移需求（不阻塞主流程）
+        $this->asyncCheckMigration();
+    }
+    
+    /**
+     * 异步检查字典迁移需求
+     */
+    private function asyncCheckMigration() {
+        // 在后台异步检查，不阻塞主流程
+        if ($this->config['background_tasks']['enable'] && function_exists('pcntl_fork')) {
+            $pid = pcntl_fork();
+            if ($pid == 0) {
+                // 子进程执行迁移检查
+                $this->checkAndExecuteMigration();
+                exit(0);
+            }
         }
     }
     
@@ -324,6 +344,11 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
      * 检查并执行字典迁移（低频字符从常用字典迁移到生僻字字典）
      */
     private function checkAndExecuteMigration() {
+        // 在测试环境中禁用字典迁移
+        if (defined('PHPUNIT_RUNNING') || php_sapi_name() === 'cli') {
+            return;
+        }
+        
         // 检查是否需要迁移（例如：每天执行一次）
         $lastMigrationTime = $this->getLastMigrationTime();
         $currentTime = time();
@@ -390,6 +415,8 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
      */
     private function lazyLoadDict(string $dictType, bool $withTone) {
         if (!$this->config['dict_loading']['lazy_loading']) {
+            // 当懒加载被禁用时，直接加载字典
+            $this->loadDictsByType($withTone, [$dictType]);
             return;
         }
         
@@ -1305,7 +1332,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         
         // 这里直接使用特殊字符中的 delete_allow  配置项, 既 数字/字母和允许的特殊字符直接返回
         // 但排除非汉字字符，让汉字进入拼音转换流程
-        if (preg_match('/^['.$this->config['special_char']['delete_allow'].']+$/', $char) && !preg_match(PinyinConstants::getChinesePattern('full'), $char)) {
+        if (preg_match('/^['.$this->config['special_char']['delete_allow'].']+$/', $char) && !PinyinConstants::isInChineseRange($char, 'full')) {
             return $char;
         }
 
@@ -1477,7 +1504,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     }
 
     /**
-     * 匹配多音字规则
+     * 智能多音字规则匹配（增强版）
      * @param string $char 汉字
      * @param array $pinyinArray 拼音选项
      * @param array $context 上下文
@@ -1493,11 +1520,18 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         $prevChar = $context['prev'] ?? '';
         $nextChar = $context['next'] ?? '';
         $word = $context['word'] ?? '';
+        $fullText = $context['full_text'] ?? '';
+        $position = $context['position'] ?? 0;
+        
+        $bestMatch = null;
+        $bestScore = 0;
     
         foreach ($rules as $rule) {
             $ruleType = $rule['type'] ?? '';
             $target = $rule['char'] ?? $rule['word'] ?? '';
             $rulePinyin = $rule['pinyin'] ?? '';
+            $ruleWeight = $rule['weight'] ?? 1.0;
+            $rulePattern = $rule['pattern'] ?? '';
     
             if (empty($rulePinyin)) {
                 continue;
@@ -1508,19 +1542,99 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             if (!in_array($checkPinyin, $pinyinArray)) {
                 continue;
             }
-    
+            
+            $score = 0;
+            
+            // 1. 精确匹配规则
             if ($ruleType === 'word' && $word === $target) {
-                return $rulePinyin;
+                $score = 1.0 * $ruleWeight;
+            } elseif ($ruleType === 'post' && $nextChar === $target) {
+                $score = 0.8 * $ruleWeight;
+            } elseif ($ruleType === 'pre' && $prevChar === $target) {
+                $score = 0.8 * $ruleWeight;
             }
-            if ($ruleType === 'post' && $nextChar === $target) {
-                return $rulePinyin;
+            
+            // 2. 正则表达式模式匹配
+            if (!empty($rulePattern) && $fullText) {
+                if (preg_match($rulePattern, $fullText)) {
+                    $score = max($score, 0.9 * $ruleWeight);
+                }
             }
-            if ($ruleType === 'pre' && $prevChar === $target) {
-                return $rulePinyin;
+            
+            // 3. 基于位置的规则（句首、句尾等）
+            if ($ruleType === 'sentence_start' && $position === 0) {
+                $score = max($score, 0.7 * $ruleWeight);
+            } elseif ($ruleType === 'sentence_end' && $position === mb_strlen($fullText) - 1) {
+                $score = max($score, 0.7 * $ruleWeight);
+            }
+            
+            // 4. 基于频率统计的规则
+            if ($ruleType === 'frequency' && isset($this->charFrequency[$char])) {
+                $freqStats = $this->charFrequency[$char];
+                if (isset($freqStats[$rulePinyin])) {
+                    $freqScore = $freqStats[$rulePinyin] / array_sum($freqStats);
+                    $score = max($score, $freqScore * $ruleWeight);
+                }
+            }
+            
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestMatch = $rulePinyin;
             }
         }
+        
+        // 设置匹配阈值，避免低分匹配
+        return $bestScore >= 0.5 ? $bestMatch : null;
+    }
     
-        return null;
+    /**
+     * 添加智能多音字规则
+     * @param string $char 汉字
+     * @param array $rule 规则配置
+     */
+    public function addPolyphoneRule($char, array $rule) {
+        $this->loadPolyphoneRules();
+        
+        if (!isset($this->dicts['polyphone_rules'][$char])) {
+            $this->dicts['polyphone_rules'][$char] = [];
+        }
+        
+        // 验证规则格式
+        if (!$this->validatePolyphoneRule($rule)) {
+            throw new PinyinException("多音字规则格式无效", PinyinException::ERROR_INVALID_INPUT);
+        }
+        
+        $this->dicts['polyphone_rules'][$char][] = $rule;
+        
+        // 保存到文件
+        $path = $this->config['dict']['polyphone_rules'];
+        FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['polyphone_rules']) . ";\n");
+    }
+    
+    /**
+     * 验证多音字规则格式
+     * @param array $rule 规则配置
+     * @return bool 是否有效
+     */
+    private function validatePolyphoneRule(array $rule): bool {
+        $required = ['type', 'pinyin'];
+        foreach ($required as $field) {
+            if (!isset($rule[$field]) || empty($rule[$field])) {
+                return false;
+            }
+        }
+        
+        $validTypes = ['word', 'pre', 'post', 'sentence_start', 'sentence_end', 'frequency', 'pattern'];
+        if (!in_array($rule['type'], $validTypes)) {
+            return false;
+        }
+        
+        // 验证拼音格式
+        if (!PinyinHelper::isValidPinyin($rule['pinyin'])) {
+            return false;
+        }
+        
+        return true;
     }
     /**
      * 记录自学习字典的数据来源
@@ -2119,6 +2233,210 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             $results[] = $this->convert($text, $separator, $withTone, $specialCharParam);
         }
         return $results;
+    }
+
+    /**
+     * 智能缓存管理（LRU淘汰策略）
+     * @param string $key 缓存键
+     * @param mixed $value 缓存值
+     */
+    private function smartCacheSet($key, $value) {
+        $maxSize = $this->config['high_freq_cache']['size'];
+        
+        // 如果缓存已满，淘汰最久未使用的项
+        if (count($this->cache) >= $maxSize && !isset($this->cache[$key])) {
+            // 找到最久未使用的键
+            $oldestKey = null;
+            $oldestTime = PHP_INT_MAX;
+            
+            foreach ($this->cacheAccessTime as $cacheKey => $accessTime) {
+                if ($accessTime < $oldestTime) {
+                    $oldestTime = $accessTime;
+                    $oldestKey = $cacheKey;
+                }
+            }
+            
+            if ($oldestKey !== null) {
+                unset($this->cache[$oldestKey]);
+                unset($this->cacheAccessTime[$oldestKey]);
+            }
+        }
+        
+        $this->cache[$key] = $value;
+        $this->cacheAccessTime[$key] = time();
+    }
+    
+    /**
+     * 智能缓存获取
+     * @param string $key 缓存键
+     * @return mixed|null 缓存值
+     */
+    private function smartCacheGet($key) {
+        if (isset($this->cache[$key])) {
+            // 更新访问时间
+            $this->cacheAccessTime[$key] = time();
+            return $this->cache[$key];
+        }
+        return null;
+    }
+    
+    /**
+     * 清理过期缓存
+     * @param int $ttl 缓存生存时间（秒）
+     */
+    public function clearExpiredCache($ttl = 3600) {
+        $currentTime = time();
+        foreach ($this->cacheAccessTime as $key => $accessTime) {
+            if ($currentTime - $accessTime > $ttl) {
+                unset($this->cache[$key]);
+                unset($this->cacheAccessTime[$key]);
+            }
+        }
+    }
+
+    /**
+     * 性能监控和优化建议
+     * @return array 性能分析报告
+     */
+    public function getPerformanceReport(): array {
+        $report = [
+            'cache_efficiency' => $this->analyzeCacheEfficiency(),
+            'memory_usage' => $this->analyzeMemoryUsage(),
+            'dict_loading' => $this->analyzeDictLoading(),
+            'optimization_suggestions' => $this->generateOptimizationSuggestions(),
+            'timestamp' => time()
+        ];
+        
+        return $report;
+    }
+    
+    /**
+     * 分析缓存效率
+     * @return array 缓存效率分析
+     */
+    private function analyzeCacheEfficiency(): array {
+        $totalAccesses = count($this->cacheAccessTime);
+        $recentAccesses = 0;
+        $currentTime = time();
+        
+        foreach ($this->cacheAccessTime as $accessTime) {
+            if ($currentTime - $accessTime < 3600) { // 1小时内
+                $recentAccesses++;
+            }
+        }
+        
+        $hitRate = $totalAccesses > 0 ? ($recentAccesses / $totalAccesses) * 100 : 0;
+        
+        return [
+            'total_entries' => count($this->cache),
+            'recent_hit_rate' => round($hitRate, 2),
+            'cache_size_limit' => $this->config['high_freq_cache']['size'],
+            'efficiency_level' => $hitRate > 70 ? 'high' : ($hitRate > 40 ? 'medium' : 'low')
+        ];
+    }
+    
+    /**
+     * 分析内存使用情况
+     * @return array 内存使用分析
+     */
+    private function analyzeMemoryUsage(): array {
+        $memoryInfo = [];
+        
+        foreach ($this->dicts as $dictType => $toneTypes) {
+            if (is_array($toneTypes)) {
+                foreach ($toneTypes as $toneType => $data) {
+                    if ($data !== null) {
+                        $memoryInfo[$dictType][$toneType] = count($data);
+                    }
+                }
+            }
+        }
+        
+        $totalEntries = array_sum(array_map('count', array_filter($this->dicts, 'is_array')));
+        
+        return [
+            'total_dict_entries' => $totalEntries,
+            'dict_details' => $memoryInfo,
+            'cache_entries' => count($this->cache),
+            'estimated_memory_mb' => round($totalEntries * 0.1 + count($this->cache) * 0.05, 2) // 估算值
+        ];
+    }
+    
+    /**
+     * 分析字典加载情况
+     * @return array 字典加载分析
+     */
+    private function analyzeDictLoading(): array {
+        $loadedDicts = [];
+        $lazyDicts = [];
+        
+        foreach ($this->dicts as $dictType => $toneTypes) {
+            if (is_array($toneTypes)) {
+                $loaded = false;
+                foreach ($toneTypes as $toneType => $data) {
+                    if ($data !== null) {
+                        $loaded = true;
+                        break;
+                    }
+                }
+                
+                if ($loaded) {
+                    $loadedDicts[] = $dictType;
+                } elseif (in_array($dictType, $this->config['dict_loading']['lazy_dicts'])) {
+                    $lazyDicts[] = $dictType;
+                }
+            }
+        }
+        
+        return [
+            'loaded_dicts' => $loadedDicts,
+            'lazy_dicts' => $lazyDicts,
+            'loading_strategy' => $this->config['dict_loading']['strategy'],
+            'lazy_loading_enabled' => $this->config['dict_loading']['lazy_loading']
+        ];
+    }
+    
+    /**
+     * 生成优化建议
+     * @return array 优化建议列表
+     */
+    private function generateOptimizationSuggestions(): array {
+        $suggestions = [];
+        
+        // 缓存优化建议
+        $cacheEfficiency = $this->analyzeCacheEfficiency();
+        if ($cacheEfficiency['efficiency_level'] === 'low') {
+            $suggestions[] = [
+                'type' => 'cache',
+                'priority' => 'high',
+                'suggestion' => '考虑增加缓存大小或优化缓存策略',
+                'details' => '当前缓存命中率较低，可能影响性能'
+            ];
+        }
+        
+        // 内存优化建议
+        $memoryUsage = $this->analyzeMemoryUsage();
+        if ($memoryUsage['estimated_memory_mb'] > 50) {
+            $suggestions[] = [
+                'type' => 'memory',
+                'priority' => 'medium',
+                'suggestion' => '考虑启用懒加载策略减少内存占用',
+                'details' => '当前内存使用较高，懒加载可以按需加载字典'
+            ];
+        }
+        
+        // 字典加载优化建议
+        $dictLoading = $this->analyzeDictLoading();
+        if (!$dictLoading['lazy_loading_enabled'] && count($dictLoading['loaded_dicts']) > 3) {
+            $suggestions[] = [
+                'type' => 'loading',
+                'priority' => 'medium',
+                'suggestion' => '启用懒加载策略提升启动速度',
+                'details' => '当前全量加载字典，启动较慢'
+            ];
+        }
+        
+        return $suggestions;
     }
 
     /**

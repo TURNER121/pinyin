@@ -56,3 +56,4 @@ Thumbs.db
 \#src/
 /pinyin.sublime-workspace
 /data/char_frequency.php
+debug_*
