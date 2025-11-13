@@ -1420,7 +1420,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         if (isset($this->dicts['rare'][$type][$char])) {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
-            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone, 'rare');
+            $this->migrateToSelfLearn($char, $rawPinyin, $withTone, 'rare');
             return PinyinHelper::parsePinyinOptions($rawPinyin);
         }
 
@@ -1432,7 +1432,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         if (isset($this->dicts['unihan'][$type][$char])) {
             $rawPinyin = $this->dicts['unihan'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
-            $this->migrateRareToSelfLearn($char, $rawPinyin, $withTone, 'unihan');
+            $this->migrateToSelfLearn($char, $rawPinyin, $withTone, 'unihan');
             return PinyinHelper::parsePinyinOptions($rawPinyin);
         }
         // 6. 基础映射表（作为最后的兜底）
@@ -1569,7 +1569,7 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
      * @param array|string $rawPinyin 拼音
      * @param bool $withTone 是否带声调
      */
-    private function migrateRareToSelfLearn($char, $rawPinyin, $withTone, $sourceType='rare') {
+    private function migrateToSelfLearn($char, $rawPinyin, $withTone, $sourceType='rare') {
         $type = $withTone ? 'with_tone' : 'no_tone';
         
         // 检查是否已经在自学习字典中
@@ -1784,21 +1784,9 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         $mode = $charConfig['mode'];
         $customMap = $charConfig['map'];
     
-        // 基本汉字/数字/字母直接返回（优先级最高）
-        if (preg_match('#^['.PinyinConstants::getChineseRange('full').'\p{N}a-zA-Z]$#u', $char)) {
+        // 基本汉字/数字/字母 连字符 - _ 直接返回（优先级最高）
+        if (preg_match('#^['.PinyinConstants::FULL_CHINESE_RANGE.'0-9a-zA-Z_-]$#u', $char)) {
             return $char;
-        }
-    
-        // 处理 replace 模式：替换指定符号，删除未指定的符号
-        if ($mode === 'replace') {
-            // 如果用户通过参数指定了map，只使用该map
-            if (!empty($customMap)) {
-                $replaced = $customMap[$char] ?? null;
-                return $replaced !== null ? $replaced : $char;
-            }
-            // 如果用户没有指定map，使用系统默认映射
-            $replaced = $this->finalCharMap[$char] ?? null;
-            return $replaced !== null ? $replaced : $char;
         }
     
         switch ($mode) {
@@ -1807,6 +1795,15 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
                 return preg_match("/^[{$deleteAllow}]$/", $char) ? $char : '';
             case 'keep':
                 return $char;
+            case 'replace':  // 处理 replace 模式：替换指定符号，删除未指定的符号
+                 // 如果用户通过参数指定了map，只使用该map
+                if (!empty($customMap)) {
+                    $replaced = $customMap[$char] ?? null;
+                    return $replaced !== null ? $replaced : $char;
+                }
+                // 如果用户没有指定map，使用系统默认映射
+                $replaced = $this->finalCharMap[$char] ?? null;
+                return $replaced !== null ? $replaced : $char;
             default:
                 return '';
         }
@@ -2128,7 +2125,9 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
     public function getUrlSlug($text, $separator = '-') {
         $separator = $separator ?: '-';
         
-        // 对于包含特殊字符的文本，先预处理特殊字符
+        // 对于包含特殊字符的文本，先预处理特殊字符 ，将所有非字母、数字、空格的字符替换为分隔符
+        // \p{L} 匹配 所有语言的字母（包括中文、日文、俄文等 Unicode 字母）
+        // \p{N} 匹配 所有语言的数字（如阿拉伯数字、中文数字等），覆盖范围极广。
         $processedText = preg_replace('/[^\p{L}\p{N}\s]/u', $separator, $text);
         
         // 修复：对于纯英文或纯数字文本，先保留空格作为单词分隔符
