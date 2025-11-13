@@ -24,27 +24,22 @@ class PinyinHelper
      * 注意：不包含标点符号、数字、空格等非汉字字符
      *
      * @param string $text 待处理的原始文本
+     * @param bool $preserveOrder 是否保持原顺序（true：提取汉字，false：删除非汉字）
      * @return string 过滤后仅包含纯汉字的字符串
      */
-    public static function filterPureChinese($text)
+    public static function filterPureChinese($text, $preserveOrder = true)
     {
         // 使用 PinyinConstants 统一管理汉字范围
-        $pattern = PinyinConstants::getChinesePattern('full');
-        // 提取所有匹配的纯汉字，拼接为字符串
-        preg_match_all($pattern, $text, $matches);
-        return implode('', $matches[0]);
-    }
-    /**
-     * 剔除文本中的非纯汉字（保留纯汉字）
-     * @param string $text 待处理文本
-     * @return string 过滤后的文本
-     */
-    public static function removeNonChinese($text)
-    {
-        // 使用 PinyinConstants 统一管理汉字范围
-        $pattern = PinyinConstants::getChinesePattern('full', true);
-        // 替换非纯汉字为空白
-        return preg_replace($pattern, '', $text);
+        if ($preserveOrder) {
+            // 提取所有匹配的纯汉字，拼接为字符串（保持原顺序）
+            $pattern = PinyinConstants::getChinesePattern('full');
+            preg_match_all($pattern, $text, $matches);
+            return implode('', $matches[0]);
+        } else {
+            // 替换非纯汉字为空白
+            $pattern = PinyinConstants::getChinesePattern('full', true);
+            return preg_replace($pattern, '', $text);
+        }
     }
     /**
      * 移除拼音中的声调
@@ -71,13 +66,47 @@ class PinyinHelper
      * 验证拼音格式是否有效
      *
      * @param string $pinyin 待验证的拼音
+     * @param bool $strict 是否严格验证（检查声调组合规则）
      * @return bool 是否有效
      */
-    public static function isValidPinyin($pinyin)
+    public static function isValidPinyin($pinyin, $strict = false)
     {
+        if (mb_strlen($pinyin) === 0) {
+            return false;
+        }
+        
         // 基本拼音格式验证
-        return preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+$/i', $pinyin) &&
-        mb_strlen($pinyin) > 0;
+        $basicValid = preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+$/i', $pinyin);
+        
+        if (!$strict || !$basicValid) {
+            return $basicValid;
+        }
+        
+        // 严格验证：检查声调组合规则
+        return self::validatePinyinToneRules($pinyin);
+    }
+    
+    /**
+     * 验证拼音声调组合规则
+     *
+     * @param string $pinyin 待验证的拼音
+     * @return bool 是否符合声调规则
+     */
+    private static function validatePinyinToneRules($pinyin)
+    {
+        // 检查是否包含多个声调符号
+        $toneChars = ['ā', 'á', 'ǎ', 'à', 'ē', 'é', 'ě', 'è', 'ī', 'í', 'ǐ', 'ì', 
+                     'ō', 'ó', 'ǒ', 'ò', 'ū', 'ú', 'ǔ', 'ù', 'ǖ', 'ǘ', 'ǚ', 'ǜ'];
+        
+        $toneCount = 0;
+        foreach ($toneChars as $toneChar) {
+            if (mb_substr_count($pinyin, $toneChar) > 0) {
+                $toneCount++;
+            }
+        }
+        
+        // 一个拼音最多只能有一个声调符号
+        return $toneCount <= 1;
     }
 
     /**
@@ -382,6 +411,140 @@ class PinyinHelper
         // 步骤3：清理多余空格（合并连续空格），并去除首尾空格
         $result = preg_replace('/\s+/', ' ', $result); // 连续空格→单个空格
         return trim($result); // 去除首尾空格
+    }
+
+    /**
+     * 将拼音转换为数字声调格式（如：zhōng → zhong1）
+     *
+     * @param string $pinyin 带声调的拼音
+     * @return string 数字声调格式的拼音
+     */
+    public static function convertToNumberTone($pinyin)
+    {
+        $toneMap = [
+            'ā' => 'a1', 'á' => 'a2', 'ǎ' => 'a3', 'à' => 'a4',
+            'ē' => 'e1', 'é' => 'e2', 'ě' => 'e3', 'è' => 'e4',
+            'ī' => 'i1', 'í' => 'i2', 'ǐ' => 'i3', 'ì' => 'i4',
+            'ō' => 'o1', 'ó' => 'o2', 'ǒ' => 'o3', 'ò' => 'o4',
+            'ū' => 'u1', 'ú' => 'u2', 'ǔ' => 'u3', 'ù' => 'u4',
+            'ǖ' => 'v1', 'ǘ' => 'v2', 'ǚ' => 'v3', 'ǜ' => 'v4',
+            'ü' => 'v'
+        ];
+        
+        return strtr($pinyin, $toneMap);
+    }
+
+    /**
+     * 将数字声调格式转换为带声调符号的拼音（如：zhong1 → zhōng）
+     *
+     * @param string $pinyin 数字声调格式的拼音
+     * @return string 带声调符号的拼音
+     */
+    public static function convertFromNumberTone($pinyin)
+    {
+        $reverseMap = [
+            'a1' => 'ā', 'a2' => 'á', 'a3' => 'ǎ', 'a4' => 'à',
+            'e1' => 'ē', 'e2' => 'é', 'e3' => 'ě', 'e4' => 'è',
+            'i1' => 'ī', 'i2' => 'í', 'i3' => 'ǐ', 'i4' => 'ì',
+            'o1' => 'ō', 'o2' => 'ó', 'o3' => 'ǒ', 'o4' => 'ò',
+            'u1' => 'ū', 'u2' => 'ú', 'u3' => 'ǔ', 'u4' => 'ù',
+            'v1' => 'ǖ', 'v2' => 'ǘ', 'v3' => 'ǚ', 'v4' => 'ǜ',
+            'v' => 'ü'
+        ];
+        
+        // 按长度从长到短排序，优先匹配长模式
+        uksort($reverseMap, function($a, $b) {
+            return strlen($b) - strlen($a);
+        });
+        
+        return strtr($pinyin, $reverseMap);
+    }
+
+    /**
+     * 获取拼音的首字母（用于拼音缩写）
+     *
+     * @param string $pinyin 拼音字符串
+     * @return string 首字母
+     */
+    public static function getPinyinInitial($pinyin)
+    {
+        if (empty($pinyin)) {
+            return '';
+        }
+        
+        // 移除声调并取第一个字符
+        $noTone = self::removeTone($pinyin);
+        return mb_substr($noTone, 0, 1);
+    }
+
+    /**
+     * 检查两个拼音是否同音（忽略声调差异）
+     *
+     * @param string $pinyin1 第一个拼音
+     * @param string $pinyin2 第二个拼音
+     * @return bool 是否同音
+     */
+    public static function isHomophone($pinyin1, $pinyin2)
+    {
+        return self::removeTone($pinyin1) === self::removeTone($pinyin2);
+    }
+
+    /**
+     * 拼音相似度比较
+     *
+     * @param string $pinyin1 第一个拼音
+     * @param string $pinyin2 第二个拼音
+     * @param bool $ignoreTone 是否忽略声调
+     * @return float 相似度（0-1之间）
+     */
+    public static function pinyinSimilarity($pinyin1, $pinyin2, $ignoreTone = true)
+    {
+        if ($ignoreTone) {
+            $pinyin1 = self::removeTone($pinyin1);
+            $pinyin2 = self::removeTone($pinyin2);
+        }
+        
+        $len1 = mb_strlen($pinyin1);
+        $len2 = mb_strlen($pinyin2);
+        
+        if ($len1 === 0 || $len2 === 0) {
+            return 0.0;
+        }
+        
+        // 简单的编辑距离相似度计算
+        $maxLen = max($len1, $len2);
+        $distance = levenshtein($pinyin1, $pinyin2);
+        
+        return 1 - ($distance / $maxLen);
+    }
+
+    /**
+     * 批量处理拼音数组
+     *
+     * @param array $pinyinArray 拼音数组
+     * @param callable $processor 处理函数
+     * @return array 处理后的数组
+     */
+    public static function batchProcessPinyin($pinyinArray, $processor)
+    {
+        return array_map($processor, $pinyinArray);
+    }
+
+    /**
+     * 拼音排序（按字母顺序）
+     *
+     * @param array $pinyinArray 拼音数组
+     * @param bool $ignoreTone 是否忽略声调
+     * @return array 排序后的数组
+     */
+    public static function sortPinyin($pinyinArray, $ignoreTone = true)
+    {
+        $processedArray = $ignoreTone 
+            ? self::batchProcessPinyin($pinyinArray, [self::class, 'removeTone'])
+            : $pinyinArray;
+        
+        array_multisort($processedArray, $pinyinArray);
+        return $pinyinArray;
     }
 
 }

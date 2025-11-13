@@ -360,21 +360,9 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
      * @param array $dictTypes 要加载的字典类型
      */
     private function loadDictsByType(bool $withTone, array $dictTypes) {
-    
         foreach ($dictTypes as $dictType) {
-            switch ($dictType) {
-                case 'common':
-                    $this->loadDictToRam('common',$withTone);
-                    break;
-                case 'rare':
-                    $this->loadDictToRam('rare',$withTone);
-                    break;
-                case 'unihan':
-                    $this->loadDictToRam('unihan',$withTone);
-                    break;
-                case 'custom':
-                    $this->loadDictToRam('custom',$withTone);
-                    break;
+            if (in_array($dictType, ['common', 'rare', 'unihan', 'custom'])) {
+                $this->loadDictToRam($dictType, $withTone);
             }
         }
     }
@@ -638,6 +626,11 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             return $issues;
         }
         
+        // 使用 PinyinHelper 进行更严格的验证
+        if (!PinyinHelper::isValidPinyin($pinyin, true)) {
+            $issues[] = '拼音格式无效或不符合声调规则';
+        }
+        
         // 检查声调一致性
         if ($withTone) {
             // 应该包含声调符号
@@ -649,11 +642,6 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             if (preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
                 $issues[] = '无声调模式下包含声调符号';
             }
-        }
-        
-        // 检查拼音格式（基本格式验证）
-        if (!preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ\s]+$/iu', $pinyin)) {
-            $issues[] = '拼音包含非法字符';
         }
         
         // 检查空格使用（单字不应该有空格，多字应该有空格）
@@ -2115,6 +2103,104 @@ foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
         }
     }
     
+
+    /**
+     * 批量转换文本数组为拼音
+     * @param array $texts 文本数组
+     * @param string $separator 拼音分隔符
+     * @param bool $withTone 是否保留声调
+     * @param array|string $specialCharParam 特殊字符处理参数
+     * @return array 转换后的拼音数组
+     */
+    public function batchConvert(array $texts, string $separator = ' ', bool $withTone = false, $specialCharParam = []): array
+    {
+        $results = [];
+        foreach ($texts as $text) {
+            $results[] = $this->convert($text, $separator, $withTone, $specialCharParam);
+        }
+        return $results;
+    }
+
+    /**
+     * 获取拼音统计信息
+     * @return array 统计信息
+     */
+    public function getStatistics(): array
+    {
+        $stats = [
+            'dictionaries' => [],
+            'cache' => [
+                'size' => count($this->cache),
+                'max_size' => $this->config['high_freq_cache']['size']
+            ],
+            'learning' => [
+                'learned_chars' => array_sum(array_map('count', $this->learnedChars)),
+                'self_learn_size' => array_sum(array_map('count', $this->dicts['self_learn'])),
+                'not_found_chars' => count($this->dicts['not_found'] ?? [])
+            ]
+        ];
+
+        // 统计各字典大小
+        foreach (['common', 'rare', 'custom', 'unihan'] as $dictType) {
+            foreach (['with_tone', 'no_tone'] as $toneType) {
+                $size = count($this->dicts[$dictType][$toneType] ?? []);
+                if ($size > 0) {
+                    $stats['dictionaries'][$dictType][$toneType] = $size;
+                }
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * 搜索拼音匹配的汉字
+     * @param string $pinyin 拼音
+     * @param bool $exactMatch 是否精确匹配
+     * @param int $limit 返回结果数量限制
+     * @return array 匹配的汉字数组
+     */
+    public function searchByPinyin(string $pinyin, bool $exactMatch = true, int $limit = 10): array
+    {
+        $results = [];
+        $searchPinyin = PinyinHelper::normalizePinyinFormat($pinyin, false);
+        
+        // 搜索所有字典
+        foreach (['common', 'rare', 'custom'] as $dictType) {
+            foreach (['with_tone', 'no_tone'] as $toneType) {
+                if ($this->dicts[$dictType][$toneType] === null) {
+                    $this->loadDictToRam($dictType, $toneType === 'with_tone');
+                }
+                
+                foreach ($this->dicts[$dictType][$toneType] as $char => $pinyinArray) {
+                    $pinyinOptions = PinyinHelper::parsePinyinOptions($pinyinArray);
+                    
+                    foreach ($pinyinOptions as $option) {
+                        $normalizedOption = PinyinHelper::normalizePinyinFormat($option, false);
+                        
+                        if ($exactMatch) {
+                            if ($normalizedOption === $searchPinyin) {
+                                $results[] = $char;
+                                break;
+                            }
+                        } else {
+                            $similarity = PinyinHelper::pinyinSimilarity($normalizedOption, $searchPinyin);
+                            if ($similarity > 0.7) {
+                                $results[] = ['char' => $char, 'similarity' => $similarity];
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (count($results) >= $limit) {
+                        break 3;
+                    }
+                }
+            }
+        }
+        
+        return array_slice($results, 0, $limit);
+    }
 
     /**
      * 转换为URL Slug
