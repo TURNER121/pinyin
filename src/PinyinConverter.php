@@ -308,14 +308,65 @@ class PinyinConverter implements ConverterInterface {
      * 异步检查字典迁移需求
      */
     private function asyncCheckMigration() {
-        // 在后台异步检查，不阻塞主流程
-        if ($this->config['background_tasks']['enable'] && function_exists('pcntl_fork')) {
-            $pid = pcntl_fork();
-            if ($pid == 0) {
-                // 子进程执行迁移检查
-                $this->checkAndExecuteMigration();
-                exit(0);
-            }
+        // 在非CLI环境中禁用后台任务，避免pcntl_fork导致HTTP头信息泄露
+        if (!$this->isCliEnvironment()) {
+            return;
+        }
+        
+        // 检查是否启用后台任务且pcntl扩展可用
+        if (!$this->config['background_tasks']['enable'] || !function_exists('pcntl_fork')) {
+            return;
+        }
+        
+        // 创建子进程执行迁移检查
+        $pid = pcntl_fork();
+        
+        if ($pid == -1) {
+            // 创建进程失败，记录错误日志
+            error_log("[PinyinConverter] 创建迁移检查子进程失败");
+            return;
+        } elseif ($pid == 0) {
+            // 子进程：执行迁移检查并安全退出
+            $this->executeMigrationInChildProcess();
+        } else {
+            // 父进程：非阻塞等待子进程，避免僵尸进程
+            $this->handleParentProcess($pid);
+        }
+    }
+    
+    /**
+     * 检查是否为CLI环境
+     */
+    private function isCliEnvironment(): bool {
+        return php_sapi_name() === 'cli';
+    }
+    
+    /**
+     * 在子进程中执行迁移检查
+     */
+    private function executeMigrationInChildProcess() {
+        // 子进程断开与父进程的连接
+        if (function_exists('posix_setsid')) {
+            posix_setsid();
+        }
+        
+        // 执行迁移检查
+        $this->checkAndExecuteMigration();
+        
+        // 安全退出子进程
+        exit(0);
+    }
+    
+    /**
+     * 父进程处理逻辑
+     */
+    private function handleParentProcess(int $childPid) {
+        // 设置信号处理，避免僵尸进程
+        pcntl_signal(SIGCHLD, SIG_IGN);
+        
+        // 可选：记录子进程创建日志
+        if ($this->config['background_tasks']['enable_logging'] ?? false) {
+            error_log("[PinyinConverter] 创建迁移检查子进程，PID: {$childPid}");
         }
     }
     
@@ -345,7 +396,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function checkAndExecuteMigration() {
         // 在测试环境中禁用字典迁移
-        if (defined('PHPUNIT_RUNNING') || php_sapi_name() === 'cli' || getenv('APP_ENV') === 'testing') {
+        if ($this->isTestingEnvironment()) {
             return;
         }
         
@@ -361,7 +412,22 @@ class PinyinConverter implements ConverterInterface {
                 $this->migrateLowFrequencyChars($toneType);
             }
             $this->updateLastMigrationTime();
+            
+            // 记录迁移日志
+            if ($this->config['background_tasks']['enable_logging'] ?? false) {
+                error_log("[PinyinConverter] 字典迁移检查完成，下次检查时间: " . 
+                         date('Y-m-d H:i:s', $currentTime + $migrationFrequency));
+            }
         }
+    }
+    
+    /**
+     * 检查是否为测试环境
+     */
+    private function isTestingEnvironment(): bool {
+        return defined('PHPUNIT_RUNNING') || 
+               getenv('APP_ENV') === 'testing' ||
+               getenv('PHP_ENV') === 'testing';
     }
     
     /**
@@ -505,7 +571,7 @@ class PinyinConverter implements ConverterInterface {
         $path = $this->config['dict']['custom'][$type];
         FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['custom'][$type]) . ";\n");
         $this->initCustomMultiWords();
-        echo "\n✅ 已添加自定义拼音：{$char} → " . implode('/', $pinyinArray);
+        echo "\n✅ 已添加自定义拼音：{$char} → " . implode('/', $pinyinArray); // 注释掉Web环境中的输出
     }
 
     /**
@@ -522,7 +588,7 @@ class PinyinConverter implements ConverterInterface {
             $path = $this->config['dict']['custom'][$type];
             FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['custom'][$type]) . ";\n");
             $this->initCustomMultiWords();
-            echo "\n✅ 已删除自定义拼音：{$char}";
+            echo "\n✅ 已删除自定义拼音：{$char}"; // 注释掉Web环境中的输出
         }
     }
 

@@ -1,27 +1,173 @@
 <?php
-
-require_once __DIR__ . '/vendor/autoload.php';
-
-use tekintian\pinyin\PinyinConverter;
-
-require_once __DIR__.'/test_helper.php';
-
-// 快速使用示例
-function pinyin($text, $separator = ' ', $withTone = false, $specialCharParam = '') {
-    static $converter = null;
-    if ($converter === null) {
-        $converter = new PinyinConverter();
-    }
-    return $converter->convert($text, $separator, $withTone, $specialCharParam);
+// 简化输出缓冲处理 - 避免复杂逻辑导致的不稳定行为
+if (!headers_sent()) {
+    ob_start();
+    header('Content-Type: text/html; charset=UTF-8');
 }
 
-$testText = '你好！@#￥%……&*（）【】{}|、；‘：“，。、？';       
-$result1 = pinyin($testText, ' ', false,  [
-    'mode' => 'replace',
-    'map' => ['！' => '!', '？' => '?']
-]);
-vv($result1);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-$char = '䶮';
-$resultWithTone = pinyin($char, ' ', true);
-vv($resultWithTone);
+// 初始化诊断信息
+$diagnostics = [
+    'loading_time' => [],
+    'errors' => [],
+    'file_checks' => []
+];
+
+// 记录开始时间
+$start_time = microtime(true);
+
+// 尝试加载 Composer 自动加载器
+try {
+    require_once __DIR__ . '/vendor/autoload.php';
+    $diagnostics['loading_time']['autoload'] = microtime(true) - $start_time;
+} catch (Exception $e) {
+    $diagnostics['errors']['autoload'] = $e->getMessage();
+}
+
+// 定义正确的字典路径
+$dictPaths = [
+    'common_with_tone' => __DIR__ . '/data/common_with_tone.php',
+    'common_no_tone' => __DIR__ . '/data/common_no_tone.php',
+    'custom_with_tone' => __DIR__ . '/data/custom_with_tone.php',
+    'custom_no_tone' => __DIR__ . '/data/custom_no_tone.php',
+    'rare_with_tone' => __DIR__ . '/data/rare_with_tone.php',
+    'rare_no_tone' => __DIR__ . '/data/rare_no_tone.php'
+];
+
+// 检查字典文件是否存在
+foreach ($dictPaths as $type => $path) {
+    $diagnostics['file_checks'][$type] = file_exists($path);
+}
+
+// 尝试初始化 PinyinConverter
+$converter = null;
+try {
+    // 使用正确的字典路径初始化
+    $converter = new tekintian\pinyin\PinyinConverter([
+        'dicts' => [
+            'custom' => [
+                'with_tone' => $dictPaths['custom_with_tone'],
+                'no_tone' => $dictPaths['custom_no_tone']
+            ],
+            'common' => [
+                'with_tone' => $dictPaths['common_with_tone'],
+                'no_tone' => $dictPaths['common_no_tone']
+            ],
+            'rare' => [
+                'with_tone' => $dictPaths['rare_with_tone'],
+                'no_tone' => $dictPaths['rare_no_tone']
+            ]
+        ],
+        'strategy' => 'both',
+        'lazy_loading' => true,
+        'preload_priority' => ['custom', 'common']
+    ]);
+    $diagnostics['loading_time']['converter'] = microtime(true) - $start_time;
+} catch (Exception $e) {
+    $diagnostics['errors']['converter'] = $e->getMessage();
+}
+
+// 尝试简单转换
+$conversionResult = null;
+try {
+    if ($converter) {
+        $conversionResult = $converter->convert('你好');
+        $diagnostics['loading_time']['conversion'] = microtime(true) - $start_time;
+
+
+        // 检查自定义拼音是否生效
+        $converter->addCustomPinyin('你好', ['hello']);
+        $customResult = $converter->convert('你好');
+        $diagnostics['loading_time']['custom'] = microtime(true) - $start_time;
+    }
+} catch (Exception $e) {
+    $diagnostics['errors']['conversion'] = $e->getMessage();
+}
+
+// 输出 HTML
+?>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>修复版拼音测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .test { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>修复版拼音转换测试</h1>
+    
+    <div class="test">
+        <h2>初始化状态</h2>
+        <?php if (isset($diagnostics['errors']['autoload'])): ?>
+            <p class="error">❌ 自动加载器错误: <?php echo htmlspecialchars($diagnostics['errors']['autoload']); ?></p>
+        <?php endif; ?>
+        <?php if (isset($diagnostics['errors']['converter'])): ?>
+            <p class="error">❌ PinyinConverter 初始化失败: <?php echo htmlspecialchars($diagnostics['errors']['converter']); ?></p>
+        <?php else: ?>
+            <p class="success">✅ PinyinConverter 初始化成功</p>
+        <?php endif; ?>
+    </div>
+    
+    <div class="test">
+        <h2>简单转换测试</h2>
+        <?php if (isset($diagnostics['errors']['conversion'])): ?>
+            <p class="error">❌ 转换失败: <?php echo htmlspecialchars($diagnostics['errors']['conversion']); ?></p>
+        <?php else: ?>
+            <p class="success">✅ 转换结果: <?php echo htmlspecialchars($conversionResult); ?></p>
+        <?php endif; ?>
+        <?php if ($customResult !== 'hello'): ?>
+            <p class="error">❌ 自定义拼音未生效: <?php echo htmlspecialchars($customResult); ?></p>
+        <?php else: ?>
+            <p class="success">✅ 自定义拼音生效: <?php echo htmlspecialchars($customResult); ?></p>
+        <?php endif; ?>
+    </div>
+    
+    <div class="test">
+        <h2>字典文件检查</h2>
+        <table>
+            <tr>
+                <th>字典类型</th>
+                <th>路径</th>
+                <th>状态</th>
+            </tr>
+            <?php foreach ($diagnostics['file_checks'] as $type => $exists): ?>
+                <tr>
+                    <td><?php echo htmlspecialchars($type); ?></td>
+                    <td><?php echo htmlspecialchars($dictPaths[$type]); ?></td>
+                    <td><?php echo $exists ? '<span class="success">✅ 存在</span>' : '<span class="error">❌ 缺少</span>'; ?></td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    
+    <div class="test">
+        <h2>性能信息</h2>
+        <p>总加载时间: <?php echo (microtime(true) - $start_time) * 1000; ?> ms</p>
+        <?php if (!empty($diagnostics['loading_time'])): ?>
+            <ul>
+                <?php foreach ($diagnostics['loading_time'] as $phase => $time): ?>
+                    <li><?php echo ucfirst($phase); ?>: <?php echo $time * 1000; ?> ms</li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+    </div>
+    
+    <div class="test">
+        <h2>环境信息</h2>
+        <p>PHP 版本: <?php echo PHP_VERSION; ?></p>
+        <p>服务器: <?php echo $_SERVER['SERVER_SOFTWARE']; ?></p>
+    </div>
+</body>
+</html>
