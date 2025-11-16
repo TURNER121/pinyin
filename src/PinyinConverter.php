@@ -3,8 +3,6 @@ namespace tekintian\pinyin;
 
 use tekintian\pinyin\Contracts\ConverterInterface;
 use tekintian\pinyin\Exception\PinyinException;
-use tekintian\pinyin\Utils\FileUtil;
-use tekintian\pinyin\Utils\PinyinHelper;
 use tekintian\pinyin\Utils\PinyinConstants;
 
 /**
@@ -48,6 +46,12 @@ class PinyinConverter implements ConverterInterface {
             'lazy_loading' => true, // 是否启用懒加载（默认启用）
             'preload_priority' => ['custom', 'common'], // 预加载优先级（移除自学习字典）
             'lazy_dicts' => ['rare', 'unihan'] // 懒加载的字典类型
+        ],
+        'custom_dict_persistence' => [
+            'enable_delayed_write' => true, // 启用延迟写入
+            'max_delayed_entries' => 100, // 最大延迟写入条目数
+            'auto_save_interval' => 30, // 自动保存间隔（秒）
+            'save_on_destruct' => true // 对象销毁时自动保存
         ],
         'special_char' => [
             'default_mode' => 'delete',
@@ -99,6 +103,33 @@ class PinyinConverter implements ConverterInterface {
         'frequency' => null,
         'polyphone_rules' => null,
         'not_found' => null
+    ];
+
+    /**
+     * 延迟写入队列
+     * @var array
+     */
+    private $delayedWriteQueue = [
+        'with_tone' => [],
+        'no_tone' => []
+    ];
+
+    /**
+     * 最后保存时间
+     * @var array
+     */
+    private $lastSaveTime = [
+        'with_tone' => 0,
+        'no_tone' => 0
+    ];
+
+    /**
+     * 延迟写入计数器
+     * @var array
+     */
+    private $delayedWriteCount = [
+        'with_tone' => 0,
+        'no_tone' => 0
     ];
 
     /**
@@ -205,6 +236,8 @@ class PinyinConverter implements ConverterInterface {
         '统' => ['tǒng', 'tong']
     ];
 
+
+
     /**
      * 构造函数
      * @param array $options 自定义配置
@@ -231,31 +264,31 @@ class PinyinConverter implements ConverterInterface {
      */
     private function initDirectories() {
         $backupDir = $this->config['dict']['backup'];
-        if (!FileUtil::fileExists($backupDir)) {
-            FileUtil::createDir($backupDir);
+        if (!is_file_exists($backupDir)) {
+            create_dir($backupDir);
         }
 
         foreach (['common', 'rare', 'self_learn', 'custom'] as $dictType) {
             foreach (['with_tone', 'no_tone'] as $toneType) {
                 $path = $this->config['dict'][$dictType][$toneType];
-                if (!FileUtil::fileExists($path)) {
-                    FileUtil::writeFile($path, "<?php\nreturn [];\n");
+                if (!is_file_exists($path)) {
+                    write_to_file($path, "<?php\nreturn [];\n");
                 }
             }
         }
 
         $polyPath = $this->config['dict']['polyphone_rules'];
-        if (!FileUtil::fileExists($polyPath)) {
-            FileUtil::writeFile($polyPath, "<?php\nreturn [];\n");
+        if (!is_file_exists($polyPath)) {
+            write_to_file($polyPath, "<?php\nreturn [];\n");
         }
         $freqPath = $this->config['dict']['frequency'];
-        if (!FileUtil::fileExists($freqPath)) {
-            FileUtil::writeFile($freqPath, "<?php\nreturn [];\n");
+        if (!is_file_exists($freqPath)) {
+            write_to_file($freqPath, "<?php\nreturn [];\n");
         }
         
         $notFoundPath = $this->config['dict']['not_found'];
-        if (!FileUtil::fileExists($notFoundPath)) {
-            FileUtil::writeFile($notFoundPath, "<?php\nreturn [];\n");
+        if (!is_file_exists($notFoundPath)) {
+            write_to_file($notFoundPath, "<?php\nreturn [];\n");
         }
         
         // 初始化自学习字典数据来源文件
@@ -267,13 +300,13 @@ class PinyinConverter implements ConverterInterface {
      */
     private function initSelfLearnSources() {
         $sourceLogFile = $this->config['dict']['backup'] . '/self_learn_sources.json';
-        if (!FileUtil::fileExists($sourceLogFile)) {
-            FileUtil::writeFile($sourceLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        if (!is_file_exists($sourceLogFile)) {
+            write_to_file($sourceLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         }
         
         $mergeLogFile = $this->config['dict']['backup'] . '/immediate_merge_log.json';
-        if (!FileUtil::fileExists($mergeLogFile)) {
-            FileUtil::writeFile($mergeLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        if (!is_file_exists($mergeLogFile)) {
+            write_to_file($mergeLogFile, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         }
     }
 
@@ -436,7 +469,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function getLastMigrationTime() {
         $path = $this->config['dict']['backup'] . "/last_migration.txt";
-        return FileUtil::fileExists($path) ? (int)FileUtil::readFile($path) : 0;
+        return is_file_exists($path) ? (int)read_file_data($path) : 0;
     }
     
     /**
@@ -444,7 +477,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function updateLastMigrationTime() {
         $path = $this->config['dict']['backup'] . "/last_migration.txt";
-        FileUtil::writeFile($path, time());
+        write_to_file($path, time());
     }
 
     /**
@@ -471,7 +504,7 @@ class PinyinConverter implements ConverterInterface {
         }
         $path = $this->config['dict'][$dictType][$type];
         // 注意这里加载的字典数据就是原始数据， 是格式化后的数据
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
 
         $this->dicts[$dictType][$type] = $data;
     }
@@ -528,21 +561,8 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['custom'][$type];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['custom'][$type] = is_array($data) ? $data : [];
-    }
-
-    /**
-     * 处理字符串中的空格
-     * @param string $text 要处理的文本
-     * @param bool $removeAllSpaces 是否完全删除空格
-     * @return string 处理后的文本
-     */
-    private function processSpaces($text, $removeAllSpaces = false) {
-        if ($removeAllSpaces) {
-            return preg_replace('/\s+/', '', $text);
-        }
-        return preg_replace('/\s+/', ' ', $text);
     }
 
     /**
@@ -559,7 +579,7 @@ class PinyinConverter implements ConverterInterface {
         $pinyinArray = is_array($pinyin) ? $pinyin : [$pinyin];
         $pinyinArray = array_map(function($item) use ($wordLen) {
             $clean = preg_replace('/[^\p{L}\p{M} ]/u', '', $item);
-            return trim(PinyinHelper::processSpaces($clean, $wordLen === 1));
+            return pinyin_process_spaces($clean); // 简化处理，直接返回清理后的字符串
         }, $pinyinArray);
 
         $pinyinArray = array_filter($pinyinArray);
@@ -567,12 +587,69 @@ class PinyinConverter implements ConverterInterface {
             throw new PinyinException("自定义拼音不能为空或包含无效字符", PinyinException::ERROR_INVALID_INPUT);
         }
 
+        // 先更新内存中的字典数据，确保即时生效
         $this->dicts['custom'][$type][$char] = $pinyinArray;
-        $path = $this->config['dict']['custom'][$type];
-        FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['custom'][$type]) . ";\n");
+        
+        // 延迟写入：将修改记录到队列中，而不是立即写入文件
+        $this->delayedWriteQueue[$type][$char] = $pinyinArray;
+        $this->delayedWriteCount[$type]++;
+        
+        // 检查是否需要立即写入（达到阈值或超过时间间隔）
+        $this->checkDelayedWrite($type);
+        
+        // 最后更新多字词语缓存
         $this->initCustomMultiWords();
-        // 注释掉Web环境中的输出，避免影响HTTP响应
-        // echo "\n✅ 已添加自定义拼音：{$char} → " . implode('/', $pinyinArray);
+        
+        pinyin_debug("已添加自定义拼音：{$char} → " . implode('/', $pinyinArray), 'success');
+    }
+
+    /**
+     * 检查并执行延迟写入
+     * @param string $type 字典类型（with_tone/no_tone）
+     */
+    private function checkDelayedWrite($type) {
+        $config = $this->config['custom_dict_persistence'];
+        
+        // 检查是否达到最大延迟条目数
+        if ($this->delayedWriteCount[$type] >= $config['max_delayed_entries']) {
+            $this->flushDelayedWrite($type);
+            return;
+        }
+        
+        // 检查是否超过自动保存间隔
+        $currentTime = time();
+        if (($currentTime - $this->lastSaveTime[$type]) >= $config['auto_save_interval']) {
+            $this->flushDelayedWrite($type);
+            return;
+        }
+    }
+
+    /**
+     * 执行延迟写入（将队列中的修改写入文件）
+     * @param string $type 字典类型（with_tone/no_tone）
+     */
+    private function flushDelayedWrite($type) {
+        if (empty($this->delayedWriteQueue[$type])) {
+            return;
+        }
+        
+        $path = $this->config['dict']['custom'][$type];
+        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['custom'][$type]) . ";\n");
+        
+        // 清空队列并更新最后保存时间
+        $this->delayedWriteQueue[$type] = [];
+        $this->delayedWriteCount[$type] = 0;
+        $this->lastSaveTime[$type] = time();
+        
+        pinyin_debug("已执行延迟写入：{$type} 字典", 'success');
+    }
+
+    /**
+     * 强制保存所有延迟写入
+     */
+    public function saveCustomDicts() {
+        $this->flushDelayedWrite('with_tone');
+        $this->flushDelayedWrite('no_tone');
     }
 
     /**
@@ -587,9 +664,9 @@ class PinyinConverter implements ConverterInterface {
         if (isset($this->dicts['custom'][$type][$char])) {
             unset($this->dicts['custom'][$type][$char]);
             $path = $this->config['dict']['custom'][$type];
-            FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['custom'][$type]) . ";\n");
+            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['custom'][$type]) . ";\n");
             $this->initCustomMultiWords();
-            echo "\n✅ 已删除自定义拼音：{$char}"; // 注释掉Web环境中的输出
+            pinyin_debug("已删除自定义拼音：{$char}", 'success');
         }
     }
 
@@ -640,7 +717,7 @@ class PinyinConverter implements ConverterInterface {
         // 如果进行了修复，保存字典
         if ($autoFix && $results['issues_fixed'] > 0) {
             $path = $this->config['dict']['custom'][$type];
-            FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['custom'][$type]) . ";\n");
+            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['custom'][$type]) . ";\n");
             $this->initCustomMultiWords();
         }
         
@@ -679,7 +756,7 @@ class PinyinConverter implements ConverterInterface {
         
         // 3. 检查每个拼音的有效性
         foreach ($pinyinArray as $index => $pinyin) {
-            $pinyinIssues = $this->validatePinyin($pinyin, $withTone);
+            $pinyinIssues = pinyin_validate($pinyin, $withTone);
             if (!empty($pinyinIssues)) {
                 $result['is_valid'] = false;
                 $result['issues'] = array_merge($result['issues'], $pinyinIssues);
@@ -696,7 +773,7 @@ class PinyinConverter implements ConverterInterface {
         
         // 5. 检查拼音格式一致性
         if (count($pinyinArray) > 1) {
-            $formatConsistency = $this->checkPinyinFormatConsistency($pinyinArray, $withTone);
+            $formatConsistency = check_pinyin_format_consistency($pinyinArray, $withTone);
             if (!$formatConsistency['consistent']) {
                 $result['is_valid'] = false;
                 $result['issues'][] = '多音字拼音格式不一致';
@@ -705,48 +782,6 @@ class PinyinConverter implements ConverterInterface {
         }
         
         return $result;
-    }
-    
-    /**
-     * 验证单个拼音的有效性
-     * @param string $pinyin 拼音
-     * @param bool $withTone 是否带声调
-     * @return array 问题列表
-     */
-    private function validatePinyin($pinyin, $withTone) {
-        $issues = [];
-        
-        // 检查是否为空
-        if (empty(trim($pinyin))) {
-            $issues[] = '拼音为空';
-            return $issues;
-        }
-        
-        // 使用 PinyinHelper 进行更严格的验证
-        if (!PinyinHelper::isValidPinyin($pinyin, true)) {
-            $issues[] = '拼音格式无效或不符合声调规则';
-        }
-        
-        // 检查声调一致性
-        if ($withTone) {
-            // 应该包含声调符号
-            if (!preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
-                $issues[] = '带声调模式下缺少声调符号';
-            }
-        } else {
-            // 不应该包含声调符号
-            if (preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
-                $issues[] = '无声调模式下包含声调符号';
-            }
-        }
-        
-        // 检查空格使用（单字不应该有空格，多字应该有空格）
-        $wordLen = mb_strlen($pinyin, 'UTF-8');
-        if ($wordLen === 1 && str_contains($pinyin, ' ')) {
-            $issues[] = '单字拼音不应包含空格';
-        }
-        
-        return $issues;
     }
     
     /**
@@ -777,34 +812,7 @@ class PinyinConverter implements ConverterInterface {
         return $duplicateSources;
     }
     
-    /**
-     * 检查拼音格式一致性
-     * @param array $pinyinArray 拼音数组
-     * @param bool $withTone 是否带声调
-     * @return array 一致性检查结果
-     */
-    private function checkPinyinFormatConsistency($pinyinArray, $withTone) {
-        $result = [
-            'consistent' => true,
-            'suggestions' => []
-        ];
-        
-        $firstPinyin = $pinyinArray[0];
-        $firstHasSpace = str_contains($firstPinyin, ' ');
-        
-        foreach ($pinyinArray as $pinyin) {
-            $hasSpace = str_contains($pinyin, ' ');
-            if ($hasSpace !== $firstHasSpace) {
-                $result['consistent'] = false;
-                $result['suggestions'] = array_map(function($p) use ($withTone) {
-                    return PinyinHelper::normalizePinyinFormat($p, $withTone);
-                }, $pinyinArray);
-                break;
-            }
-        }
-        
-        return $result;
-    }
+    
     
     /**
      * 修复自定义字典条目
@@ -834,7 +842,7 @@ class PinyinConverter implements ConverterInterface {
         // 修复每个拼音
         $fixedPinyinArray = [];
         foreach ($pinyinArray as $pinyin) {
-            $fixedPinyin = PinyinHelper::normalizePinyinFormat($pinyin, $withTone);
+            $fixedPinyin = pinyin_normalize_format($pinyin, $withTone);
             if (!empty(trim($fixedPinyin))) {
                 $fixedPinyinArray[] = $fixedPinyin;
             }
@@ -861,7 +869,7 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['frequency'];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['frequency'] = is_array($data) ? $data : [];
         $this->charFrequency = $this->dicts['frequency'];
     }
@@ -871,7 +879,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function saveFrequency() {
         $path = $this->config['dict']['frequency'];
-        FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->charFrequency) . ";\n");
+        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->charFrequency) . ";\n");
         $this->dicts['frequency'] = $this->charFrequency;
     }
 
@@ -892,7 +900,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function getLastMergeTimeFile($toneType) {
         $path = $this->config['dict']['backup'] . "/last_merge_{$toneType}.txt";
-        return FileUtil::fileExists($path) ? (int)FileUtil::readFile($path) : 0;
+        return is_file_exists($path) ? (int)read_file_data($path) : 0;
     }
 
     /**
@@ -902,7 +910,7 @@ class PinyinConverter implements ConverterInterface {
     private function updateLastMergeTime($toneType) {
         $now = time();
         $path = $this->config['dict']['backup'] . "/last_merge_{$toneType}.txt";
-        FileUtil::writeFile($path, $now);
+        write_to_file($path, $now);
         $this->lastMergeTime[$toneType] = $now;
     }
 
@@ -927,12 +935,12 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $sourcePath = $this->config['dict'][$type][$toneType];
-        if (!FileUtil::fileExists($sourcePath)) {
+        if (!is_file_exists($sourcePath)) {
             return;
         }
         $backupDir = $this->config['dict']['backup'];
         $filename = basename($sourcePath, '.php') . '_' . date('YmdHis') . '.php';
-        FileUtil::copyFile($sourcePath, $backupDir . '/' . $filename);
+        copy_file($sourcePath, $backupDir . '/' . $filename);
     }
 
     /**
@@ -996,8 +1004,8 @@ class PinyinConverter implements ConverterInterface {
         $this->backupDict('self_learn', $toneType);
 
         $commonPath = $this->config['dict']['common'][$toneType];
-        $commonData = FileUtil::requireFile($commonPath);
-        $commonData = PinyinHelper::formatPinyinArray($commonData);
+        $commonData = require_file($commonPath);
+        $commonData = pinyin_format_array($commonData);
         
         $selfLearnData = $this->dicts['self_learn'][$toneType];
         $sortedChars = $this->sortSelfLearnByFrequency($selfLearnData, $toneType);
@@ -1020,7 +1028,7 @@ class PinyinConverter implements ConverterInterface {
             $commonData = $this->sortCommonDictByFrequency($commonData, $toneType);
         }
 
-        FileUtil::writeFile($commonPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($commonData) . ";\n");
+        write_to_file($commonPath, "<?php\nreturn " . pinyin_compact_array_export($commonData) . ";\n");
         $this->dicts['common'][$toneType] = $commonData;
     }
     
@@ -1034,8 +1042,8 @@ class PinyinConverter implements ConverterInterface {
         
         // 检查目标字典中是否已存在该字符
         $targetCommonPath = $this->config['dict']['common'][$targetToneType];
-        $targetCommonData = FileUtil::requireFile($targetCommonPath);
-        $targetCommonData = PinyinHelper::formatPinyinArray($targetCommonData);
+        $targetCommonData = require_file($targetCommonPath);
+        $targetCommonData = pinyin_format_array($targetCommonData);
         
         if (isset($targetCommonData[$char])) {
             return; // 目标字典中已存在，无需同步
@@ -1055,7 +1063,7 @@ class PinyinConverter implements ConverterInterface {
             $targetCommonData[$char] = $targetPinyin;
             
             // 保存目标字典
-            FileUtil::writeFile($targetCommonPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($targetCommonData) . ";\n");
+            write_to_file($targetCommonPath, "<?php\nreturn " . pinyin_compact_array_export($targetCommonData) . ";\n");
             $this->dicts['common'][$targetToneType] = $targetCommonData;
         }
     }
@@ -1074,7 +1082,7 @@ class PinyinConverter implements ConverterInterface {
             foreach ($this->dicts['common']['with_tone'] as $commonChar => $pinyinArray) {
                 if ($commonChar === $char) {
                     foreach ($pinyinArray as $pinyin) {
-                        $noToneVersion = PinyinHelper::removeTone($pinyin);
+                        $noToneVersion = remove_tone($pinyin);
                         if ($noToneVersion === $noTonePinyin) {
                             return $pinyin; // 找到匹配的带声调拼音
                         }
@@ -1088,7 +1096,7 @@ class PinyinConverter implements ConverterInterface {
             foreach ($this->dicts['rare']['with_tone'] as $rareChar => $pinyinArray) {
                 if ($rareChar === $char) {
                     foreach ($pinyinArray as $pinyin) {
-                        $noToneVersion = PinyinHelper::removeTone($pinyin);
+                        $noToneVersion = remove_tone($pinyin);
                         if ($noToneVersion === $noTonePinyin) {
                             return $pinyin;
                         }
@@ -1100,7 +1108,7 @@ class PinyinConverter implements ConverterInterface {
         // 3. 尝试从Unihan字典查询（如果可用）
         $unihanPinyin = $this->queryUnihanForPinyin($char);
         if ($unihanPinyin) {
-            $noToneVersion = PinyinHelper::removeTone($unihanPinyin);
+            $noToneVersion = remove_tone($unihanPinyin);
             if ($noToneVersion === $noTonePinyin) {
                 return $unihanPinyin;
             }
@@ -1128,8 +1136,8 @@ class PinyinConverter implements ConverterInterface {
         ];
         
         foreach ($unihanFiles as $file) {
-            if (FileUtil::fileExists($file)) {
-                $unihanData = FileUtil::requireFile($file);
+            if (is_file_exists($file)) {
+                $unihanData = require_file($file);
                 if (isset($unihanData[$char])) {
                     $pinyin = is_array($unihanData[$char]) ? $unihanData[$char][0] : $unihanData[$char];
                     return $pinyin;
@@ -1166,7 +1174,7 @@ class PinyinConverter implements ConverterInterface {
         
         if (isset($commonToneRules[$char])) {
             foreach ($commonToneRules[$char] as $withTonePinyin) {
-                if (PinyinHelper::removeTone($withTonePinyin) === $noTonePinyin) {
+                if (remove_tone($withTonePinyin) === $noTonePinyin) {
                     return $withTonePinyin;
                 }
             }
@@ -1222,7 +1230,7 @@ class PinyinConverter implements ConverterInterface {
         foreach ($sourcePinyin as $pinyin) {
             if ($sourceToneType === 'with_tone' && $targetToneType === 'no_tone') {
                 // 带声调转无声调：去除声调符号（简单可靠）
-                $convertedPinyin[] = PinyinHelper::removeTone($pinyin);
+                $convertedPinyin[] = remove_tone($pinyin);
             } else if ($sourceToneType === 'no_tone' && $targetToneType === 'with_tone') {
                 // 无声调转带声调：需要复杂的查找逻辑
                 $withTonePinyin = $this->findPinyinWithTone($char, $pinyin);
@@ -1290,7 +1298,7 @@ class PinyinConverter implements ConverterInterface {
             unset($selfLearnData[$char]);
         }
         $selfLearnPath = $this->config['dict']['self_learn'][$toneType];
-        FileUtil::writeFile($selfLearnPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($selfLearnData) . ";\n");
+        write_to_file($selfLearnPath, "<?php\nreturn " . pinyin_compact_array_export($selfLearnData) . ";\n");
         $this->dicts['self_learn'][$toneType] = $selfLearnData;
         $this->learnedChars[$toneType] = array_diff_key($this->learnedChars[$toneType], array_flip($charsToClean));
 
@@ -1329,10 +1337,10 @@ class PinyinConverter implements ConverterInterface {
      */
     private function migrateLowFrequencyChars($toneType) {
         $commonPath = $this->config['dict']['common'][$toneType];
-        $commonData = FileUtil::requireFile($commonPath);
+        $commonData = require_file($commonPath);
   
         $rarePath = $this->config['dict']['rare'][$toneType];
-        $rareData = FileUtil::fileExists($rarePath) ? FileUtil::requireFile($rarePath) : [];
+        $rareData = is_file_exists($rarePath) ? require_file($rarePath) : [];
         
         // 计算常用字典中每个字符的平均频率
         $totalFrequency = 0;
@@ -1366,8 +1374,8 @@ class PinyinConverter implements ConverterInterface {
         
         // 保存更新后的字典
         if (!empty($migratedChars)) {
-            FileUtil::writeFile($commonPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($commonData) . ";\n");
-            FileUtil::writeFile($rarePath, "<?php\nreturn " . PinyinHelper::compactArrayExport($rareData) . ";\n");
+            write_to_file($commonPath, "<?php\nreturn " . pinyin_compact_array_export($commonData) . ";\n");
+            write_to_file($rarePath, "<?php\nreturn " . pinyin_compact_array_export($rareData) . ";\n");
             
             // 更新内存中的字典数据
             $this->dicts['common'][$toneType] = $commonData;
@@ -1387,8 +1395,8 @@ class PinyinConverter implements ConverterInterface {
         $logFile = $this->config['dict']['backup'] . '/migration_log.json';
         $log = [];
         
-        if (FileUtil::fileExists($logFile)) {
-            $content = FileUtil::readFile($logFile);
+        if (is_file_exists($logFile)) {
+            $content = read_file_data($logFile);
             $log = json_decode($content, true) ?: [];
         }
         
@@ -1399,7 +1407,7 @@ class PinyinConverter implements ConverterInterface {
             'migrated_count' => count($migratedChars)
         ];
         
-        FileUtil::writeFile($logFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        write_to_file($logFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -1410,7 +1418,7 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['polyphone_rules'];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['polyphone_rules'] = is_array($data) ? $data : [];
     }
 
@@ -1422,7 +1430,7 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['not_found'];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['not_found'] = is_array($data) ? $data : [];
     }
 
@@ -1436,7 +1444,7 @@ class PinyinConverter implements ConverterInterface {
             return;
         }
         $path = $this->config['dict']['self_learn'][$type];
-        $data = FileUtil::fileExists($path) ? FileUtil::requireFile($path) : [];
+        $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['self_learn'][$type] = is_array($data) ? $data : [];
     }
 
@@ -1460,7 +1468,7 @@ class PinyinConverter implements ConverterInterface {
 
         // 临时映射（单字处理）- 最高优先级
         if (isset($tempMap[$char])) {
-            return PinyinHelper::cleanPinyin($tempMap[$char], true);
+            return clean_pinyin($tempMap[$char], true);
         }
 
         // 多音字规则检查 - 第二优先级（基于上下文的智能选择）
@@ -1474,10 +1482,10 @@ class PinyinConverter implements ConverterInterface {
             if ($matchedPinyin !== null) {
                 // 根据withTone参数决定是否去除声调
                 if (!$withTone && preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $matchedPinyin)) {
-                    $matchedPinyin = PinyinHelper::removeTone($matchedPinyin);
+                    $matchedPinyin = remove_tone($matchedPinyin);
                 }
                 
-                return PinyinHelper::cleanPinyin($matchedPinyin, true);
+                return clean_pinyin($matchedPinyin, true);
             }
         }
 
@@ -1487,21 +1495,21 @@ class PinyinConverter implements ConverterInterface {
         }
         
         if (isset($this->dicts['custom'][$type][$char])) {
-            $pinyin = PinyinHelper::getFirstPinyin($this->dicts['custom'][$type][$char]);
-            return PinyinHelper::cleanPinyin($pinyin, mb_strlen($char, 'UTF-8') === 1);
+            $pinyin = get_first_pinyin($this->dicts['custom'][$type][$char]);
+            return clean_pinyin($pinyin, mb_strlen($char, 'UTF-8') === 1);
         }
         
         // 其他字典（按照common_xxx, rare_xxx的顺序）
         $pinyinArray = $this->getAllPinyinOptions($char, $withTone);
-        $pinyin = PinyinHelper::getFirstPinyin($pinyinArray);
+        $pinyin = get_first_pinyin($pinyinArray);
 
         // 根据withTone参数决定是否去除声调
         if (!$withTone && preg_match('/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/u', $pinyin)) {
-            $pinyin = PinyinHelper::removeTone($pinyin);
+            $pinyin = remove_tone($pinyin);
         }
         
         // 修复：如果没有找到拼音，返回汉字本身
-        $result = !empty(trim($pinyin)) ? PinyinHelper::cleanPinyin($pinyin, true) : $char;
+        $result = !empty(trim($pinyin)) ? clean_pinyin($pinyin, true) : $char;
         
         // 更新字符使用频率（仅在成功获取拼音时）
         if ($result !== $char && preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+$/i', $result)) {
@@ -1526,7 +1534,7 @@ class PinyinConverter implements ConverterInterface {
         }
         if (isset($this->dicts['custom'][$type][$char])) {
             $pinyin = $this->dicts['custom'][$type][$char];
-            return PinyinHelper::parsePinyinOptions($pinyin);
+            return pinyin_parse_options($pinyin);
         }
 
         // 2. 多音字规则检查
@@ -1546,7 +1554,7 @@ class PinyinConverter implements ConverterInterface {
         }
         if (isset($this->dicts['common'][$type][$char])) {
             $pinyin = $this->dicts['common'][$type][$char];
-            return PinyinHelper::parsePinyinOptions($pinyin);
+            return pinyin_parse_options($pinyin);
         }
 
         // 4. 自定义生僻字字典（并记录到自学习字典）- 懒加载  注意这里的生僻字典是来自Unihan数据库的CJK基本汉字 20923个汉字
@@ -1558,7 +1566,7 @@ class PinyinConverter implements ConverterInterface {
             $rawPinyin = $this->dicts['rare'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
             $this->migrateToSelfLearn($char, $rawPinyin, $withTone, 'rare');
-            return PinyinHelper::parsePinyinOptions($rawPinyin);
+            return pinyin_parse_options($rawPinyin);
         }
 
         // 5. unihan字典 这个字典的规则同 4自定义生僻字字典, 不同的是这个字典里面的数据来源unicode官方,使用过程不会做调整
@@ -1570,7 +1578,9 @@ class PinyinConverter implements ConverterInterface {
             $rawPinyin = $this->dicts['unihan'][$type][$char];
             // 记录生僻字到自学习字典（但不立即加载自学习字典）
             $this->migrateToSelfLearn($char, $rawPinyin, $withTone, 'unihan');
-            return PinyinHelper::parsePinyinOptions($rawPinyin);
+           return pinyin_parse_options($rawPinyin);
+           // return is_array($rawPinyin) ? $rawPinyin : [$rawPinyin]; // 简化处理，直接返回拼音数组
+
         }
         // 6. 基础映射表（作为最后的兜底）
         if (isset($this->basicPinyinMap[$char])) {
@@ -1598,7 +1608,7 @@ class PinyinConverter implements ConverterInterface {
             $this->loadSelfLearnDict($withTone);
         }
         if (isset($this->dicts['self_learn'][$type][$char])) {
-            $options = array_merge($options, PinyinHelper::parsePinyinOptions($this->dicts['self_learn'][$type][$char]));
+            $options = array_merge($options, pinyin_parse_options($this->dicts['self_learn'][$type][$char]));
         }
 
         // 常用字典
@@ -1606,7 +1616,7 @@ class PinyinConverter implements ConverterInterface {
             $this->loadDictToRam('common',$withTone);
         }
         if (isset($this->dicts['common'][$type][$char])) {
-            $options = array_merge($options, PinyinHelper::parsePinyinOptions($this->dicts['common'][$type][$char]));
+            $options = array_merge($options, pinyin_parse_options($this->dicts['common'][$type][$char]));
         }
 
         // 生僻字字典
@@ -1614,7 +1624,7 @@ class PinyinConverter implements ConverterInterface {
             $this->lazyLoadDict('rare', $withTone);
         }
         if (isset($this->dicts['rare'][$type][$char])) {
-            $options = array_merge($options, PinyinHelper::parsePinyinOptions($this->dicts['rare'][$type][$char]));
+            $options = array_merge($options, pinyin_parse_options($this->dicts['rare'][$type][$char]));
         }
 
         // 基础映射表
@@ -1660,7 +1670,7 @@ class PinyinConverter implements ConverterInterface {
             }
             
             // 修复：当不需要声调时，先移除规则拼音中的声调再进行匹配
-            $checkPinyin = $withTone ? $rulePinyin : PinyinHelper::removeTone($rulePinyin);
+            $checkPinyin = $withTone ? $rulePinyin : remove_tone($rulePinyin);
             if (!in_array($checkPinyin, $pinyinArray)) {
                 continue;
             }
@@ -1730,7 +1740,7 @@ class PinyinConverter implements ConverterInterface {
         
         // 保存到文件
         $path = $this->config['dict']['polyphone_rules'];
-        FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['polyphone_rules']) . ";\n");
+        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['polyphone_rules']) . ";\n");
     }
     
     /**
@@ -1752,7 +1762,7 @@ class PinyinConverter implements ConverterInterface {
         }
         
         // 验证拼音格式
-        if (!PinyinHelper::isValidPinyin($rule['pinyin'])) {
+        if (!is_valid_pinyin($rule['pinyin'])) {
             return false;
         }
         
@@ -1768,8 +1778,8 @@ class PinyinConverter implements ConverterInterface {
         $sourceLogFile = $this->config['dict']['backup'] . '/self_learn_sources.json';
         $sources = [];
         
-        if (FileUtil::fileExists($sourceLogFile)) {
-            $content = FileUtil::readFile($sourceLogFile);
+        if (is_file_exists($sourceLogFile)) {
+            $content = read_file_data($sourceLogFile);
             $sources = json_decode($content, true) ?: [];
         }
         
@@ -1784,7 +1794,7 @@ class PinyinConverter implements ConverterInterface {
             ];
         }
         
-        FileUtil::writeFile($sourceLogFile, json_encode($sources, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        write_to_file($sourceLogFile, json_encode($sources, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
     
     /**
@@ -1849,14 +1859,14 @@ class PinyinConverter implements ConverterInterface {
         
         // 加载常用字典
         $commonPath = $this->config['dict']['common'][$type];
-        $commonData = FileUtil::requireFile($commonPath);
+        $commonData = require_file($commonPath);
         
         // 如果常用字典中还没有这个字，就添加进去
         if (!isset($commonData[$char])) {
             $commonData[$char] = $this->dicts['self_learn'][$type][$char];
             
             // 保存更新后的常用字典
-            FileUtil::writeFile($commonPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($commonData) . ";\n");
+            write_to_file($commonPath, "<?php\nreturn " . pinyin_compact_array_export($commonData) . ";\n");
             $this->dicts['common'][$type] = $commonData;
             
             // 从自学习字典中移除
@@ -1865,7 +1875,7 @@ class PinyinConverter implements ConverterInterface {
             
             // 保存更新后的自学习字典
             $selfLearnPath = $this->config['dict']['self_learn'][$type];
-            FileUtil::writeFile($selfLearnPath, "<?php\nreturn " . PinyinHelper::compactArrayExport($this->dicts['self_learn'][$type]) . ";\n");
+            write_to_file($selfLearnPath, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['self_learn'][$type]) . ";\n");
             
             // 记录合并日志
             $this->logImmediateMerge($char, $type);
@@ -1881,8 +1891,8 @@ class PinyinConverter implements ConverterInterface {
         $mergeLogFile = $this->config['dict']['backup'] . '/immediate_merge_log.json';
         $log = [];
         
-        if (FileUtil::fileExists($mergeLogFile)) {
-            $content = FileUtil::readFile($mergeLogFile);
+        if (is_file_exists($mergeLogFile)) {
+            $content = read_file_data($mergeLogFile);
             $log = json_decode($content, true) ?: [];
         }
         
@@ -1893,7 +1903,7 @@ class PinyinConverter implements ConverterInterface {
             'frequency' => $this->charFrequency[$type][$char] ?? 0
         ];
         
-        FileUtil::writeFile($mergeLogFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        write_to_file($mergeLogFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -1956,12 +1966,12 @@ class PinyinConverter implements ConverterInterface {
         
         // 保存到文件
         $path = $this->config['dict']['not_found'];
-        $existing = FileUtil::requireFile($path);
+        $existing = require_file($path);
         $existing = is_array($existing) ? $existing : [];
         
         // 去重并保存
         $merged = array_unique(array_merge($existing, $this->notFoundChars));
-        FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($merged) . ";\n");
+        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($merged) . ";\n");
         
         // 创建后台任务记录
         $this->createBackgroundTask('not_found_resolve', ['char' => $char]);
@@ -1979,9 +1989,9 @@ class PinyinConverter implements ConverterInterface {
                 continue;
             }
             $path = $this->config['dict']['self_learn'][$type];
-            $existing = FileUtil::requireFile($path);
+            $existing = require_file($path);
             $merged = array_merge($existing, $this->learnedChars[$type]);
-            FileUtil::writeFile($path, "<?php\nreturn " . PinyinHelper::compactArrayExport($merged) . ";\n");
+            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($merged) . ";\n");
             $this->dicts['self_learn'][$type] = $merged;
             $this->learnedChars[$type] = [];
         }
@@ -1995,7 +2005,7 @@ class PinyinConverter implements ConverterInterface {
      * @return string 无声调拼音
      */
     private function removeTone($pinyin) {
-        return PinyinHelper::removeTone($pinyin);
+        return remove_tone($pinyin);
     }
 
     /**
@@ -2077,7 +2087,7 @@ class PinyinConverter implements ConverterInterface {
             
             // 检查文本中是否包含该词语
             if (strpos($result, $word) !== false) {
-                $pinyin = PinyinHelper::getFirstPinyin($item['pinyin']);
+                $pinyin = get_first_pinyin($item['pinyin']);
                 // 将拼音中的空格替换为实际分隔符
                 $processedPinyin = str_replace(' ', $separator, $pinyin);
                 // 使用特殊标记来保护拼音字符串不被后续处理拆分
@@ -2608,7 +2618,7 @@ class PinyinConverter implements ConverterInterface {
     public function searchByPinyin(string $pinyin, bool $exactMatch = true, int $limit = 10): array
     {
         $results = [];
-        $searchPinyin = PinyinHelper::normalizePinyinFormat($pinyin, false);
+        $searchPinyin =pinyin_normalize_format($pinyin, false);
         
         // 搜索所有字典
         foreach (['common', 'rare', 'custom'] as $dictType) {
@@ -2618,10 +2628,10 @@ class PinyinConverter implements ConverterInterface {
                 }
                 
                 foreach ($this->dicts[$dictType][$toneType] as $char => $pinyinArray) {
-                    $pinyinOptions = PinyinHelper::parsePinyinOptions($pinyinArray);
+                    $pinyinOptions = pinyin_parse_options($pinyinArray);
                     
                     foreach ($pinyinOptions as $option) {
-                        $normalizedOption = PinyinHelper::normalizePinyinFormat($option, false);
+                        $normalizedOption = pinyin_normalize_format($option, false);
                         
                         if ($exactMatch) {
                             if ($normalizedOption === $searchPinyin) {
@@ -2629,7 +2639,7 @@ class PinyinConverter implements ConverterInterface {
                                 break;
                             }
                         } else {
-                            $similarity = PinyinHelper::pinyinSimilarity($normalizedOption, $searchPinyin);
+                            $similarity = pinyin_similarity($normalizedOption, $searchPinyin);
                             $similarityThreshold = $this->config['search']['similarity_threshold'] ?? 0.7;
                             if ($similarity > $similarityThreshold) {
                                 $results[] = ['char' => $char, 'similarity' => $similarity];
@@ -2661,7 +2671,7 @@ class PinyinConverter implements ConverterInterface {
         $enableChineseToArabic = getenv('ENABLE_CHINESE_TO_ARABIC') ?? true;
         if ($enableChineseToArabic) {
             // 中文数字转阿拉伯数字
-            $text = PinyinHelper::chineseNumberToArabic($text);
+            $text = pinyin_chinese_number_to_arabic($text);
         }
         
         // 对于包含特殊字符的文本，先预处理特殊字符 ，将所有非字母、数字、空格的字符替换为分隔符
@@ -2692,6 +2702,10 @@ class PinyinConverter implements ConverterInterface {
      * 析构函数：保存自学习内容和频率数据
      */
     public function __destruct() {
+        if ($this->config['custom_dict_persistence']['save_on_destruct']) {
+            $this->saveCustomDicts();
+        }
+        
         $this->saveLearnedChars();
         
         // 保存频率数据（如果已修改）

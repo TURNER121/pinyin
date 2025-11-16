@@ -46,7 +46,7 @@ $converter = null;
 try {
     // 使用正确的字典路径初始化
     $converter = new tekintian\pinyin\PinyinConverter([
-        'dicts' => [
+        'dict' => [
             'custom' => [
                 'with_tone' => $dictPaths['custom_with_tone'],
                 'no_tone' => $dictPaths['custom_no_tone']
@@ -60,9 +60,11 @@ try {
                 'no_tone' => $dictPaths['rare_no_tone']
             ]
         ],
-        'strategy' => 'both',
-        'lazy_loading' => true,
-        'preload_priority' => ['custom', 'common']
+        'dict_loading' => [
+            'strategy' => 'both',
+            'lazy_loading' => false, // 禁用懒加载确保自定义字典被正确加载
+            'preload_priority' => ['custom', 'common']
+        ]
     ]);
     $diagnostics['loading_time']['converter'] = microtime(true) - $start_time;
 } catch (Exception $e) {
@@ -71,16 +73,23 @@ try {
 
 // 尝试简单转换
 $conversionResult = null;
+$customResult = null;
+$dynamicCustomResult = null;
 try {
     if ($converter) {
+        
+        // 测试普通转换
         $conversionResult = $converter->convert('你好');
         $diagnostics['loading_time']['conversion'] = microtime(true) - $start_time;
 
-
-        // 检查自定义拼音是否生效
-        $converter->addCustomPinyin('你好', ['hello']);
+        // 测试字典文件中已有的自定义拼音
         $customResult = $converter->convert('你好');
         $diagnostics['loading_time']['custom'] = microtime(true) - $start_time;
+
+        // 测试动态添加的自定义拼音
+        $converter->addCustomPinyin('测试', ['test']);
+        $dynamicCustomResult = $converter->convert('测试');
+        $diagnostics['loading_time']['dynamic_custom'] = microtime(true) - $start_time;
     }
 } catch (Exception $e) {
     $diagnostics['errors']['conversion'] = $e->getMessage();
@@ -125,12 +134,21 @@ try {
         <?php if (isset($diagnostics['errors']['conversion'])): ?>
             <p class="error">❌ 转换失败: <?php echo htmlspecialchars($diagnostics['errors']['conversion']); ?></p>
         <?php else: ?>
-            <p class="success">✅ 转换结果: <?php echo htmlspecialchars($conversionResult); ?></p>
+            <p class="success">✅ 普通转换结果: <?php echo htmlspecialchars($conversionResult); ?></p>
         <?php endif; ?>
+        
+        <h3>字典文件自定义拼音测试</h3>
         <?php if ($customResult !== 'hello'): ?>
-            <p class="error">❌ 自定义拼音未生效: <?php echo htmlspecialchars($customResult); ?></p>
+            <p class="error">❌ 字典文件自定义拼音未生效: <?php echo htmlspecialchars($customResult); ?></p>
         <?php else: ?>
-            <p class="success">✅ 自定义拼音生效: <?php echo htmlspecialchars($customResult); ?></p>
+            <p class="success">✅ 字典文件自定义拼音生效: <?php echo htmlspecialchars($customResult); ?></p>
+        <?php endif; ?>
+        
+        <h3>动态添加自定义拼音测试</h3>
+        <?php if ($dynamicCustomResult !== 'test'): ?>
+            <p class="error">❌ 动态添加自定义拼音未生效: <?php echo htmlspecialchars($dynamicCustomResult); ?></p>
+        <?php else: ?>
+            <p class="success">✅ 动态添加自定义拼音生效: <?php echo htmlspecialchars($dynamicCustomResult); ?></p>
         <?php endif; ?>
     </div>
     

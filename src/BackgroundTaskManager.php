@@ -1,9 +1,8 @@
 <?php
 namespace tekintian\pinyin;
 
-use tekintian\pinyin\Utils\FileUtil;
 use tekintian\pinyin\Utils\AutoPinyinFetcher;
-use tekintian\pinyin\Utils\PinyinHelper;
+use tekintian\pinyin\Utils\PinyinConstants;
 
 /**
  * 后台任务管理器
@@ -37,8 +36,8 @@ class BackgroundTaskManager
         ], $config);
         
         // 确保任务目录存在
-        if (!FileUtil::fileExists($this->config['task_dir'])) {
-            FileUtil::createDir($this->config['task_dir']);
+        if (!is_file_exists($this->config['task_dir'])) {
+            create_dir($this->config['task_dir']);
         }
     }
     
@@ -70,7 +69,7 @@ class BackgroundTaskManager
         $taskFile = $this->config['task_dir'] . $task['id'] . '.json';
         
         try {
-            FileUtil::writeFile($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             return true;
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 创建任务失败: " . $e->getMessage());
@@ -87,7 +86,7 @@ class BackgroundTaskManager
     {
         $tasks = [];
         
-        if (!FileUtil::fileExists($this->config['task_dir'])) {
+        if (!is_file_exists($this->config['task_dir'])) {
             return $tasks;
         }
         
@@ -95,7 +94,7 @@ class BackgroundTaskManager
         
         foreach ($files as $file) {
             try {
-                $content = FileUtil::readFile($file);
+                $content = read_file_data($file);
                 $task = json_decode($content, true);
                 
                 if ($task && $task['status'] === 'pending' && $task['attempts'] < $task['max_attempts']) {
@@ -134,7 +133,7 @@ class BackgroundTaskManager
             $task['status'] = 'running';
             $task['started_at'] = time();
             $task['attempts']++;
-            FileUtil::writeFile($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             
             // 执行任务
             $success = $this->executeTaskByType($task, $converter);
@@ -145,10 +144,10 @@ class BackgroundTaskManager
             
             if ($success) {
                 // 删除已完成的任务文件
-                FileUtil::deleteFile($taskFile);
+                delete_file($taskFile);
             } else {
                 // 保存失败的任务状态
-                FileUtil::writeFile($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             }
             
             return $success;
@@ -162,7 +161,7 @@ class BackgroundTaskManager
             $task['error'] = $e->getMessage();
             
             try {
-                FileUtil::writeFile($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             } catch (\Exception $writeError) {
                 // 忽略写入错误
             }
@@ -313,12 +312,12 @@ class BackgroundTaskManager
         // 使用常用字典来判断是否为常用汉字
         $commonDictPath = __DIR__ . '/../data/common_with_tone.php';
         
-        if (!FileUtil::fileExists($commonDictPath)) {
+        if (!is_file_exists($commonDictPath)) {
             return false;
         }
         
         try {
-            $commonDict = FileUtil::requireFile($commonDictPath);
+            $commonDict = require_file($commonDictPath);
             $commonDict = is_array($commonDict) ? $commonDict : [];
             
             // 如果字符在常用字典中，则认为是常用汉字
@@ -380,10 +379,10 @@ class BackgroundTaskManager
         }
         
         foreach ($dictFiles[$dictType] as $toneType => $filePath) {
-            if (!FileUtil::fileExists($filePath)) {
+            if (!is_file_exists($filePath)) {
                 // 如果文件不存在，尝试创建空字典文件
                 try {
-                    FileUtil::writeFile($filePath, "<?php\nreturn [];\n");
+                    write_to_file($filePath, "<?php\nreturn [];\n");
                 } catch (\Exception $e) {
                     error_log("[BackgroundTaskManager] 创建字典文件失败: " . $e->getMessage());
                     continue;
@@ -391,7 +390,7 @@ class BackgroundTaskManager
             }
             
             try {
-                $dictData = FileUtil::requireFile($filePath);
+                $dictData = require_file($filePath);
                 $dictData = is_array($dictData) ? $dictData : [];
                 
                 // 如果字符已存在，跳过
@@ -402,16 +401,16 @@ class BackgroundTaskManager
                 // 添加字符到字典
                 $dictData[$char] = $toneType === 'with_tone' ? $pinyin : $this->removeToneFromPinyin($pinyin);
                 
-                // 使用PinyinConverter的紧凑数组导出方法保持格式一致
+                // 使用全局函数的紧凑数组导出方法保持格式一致
                 if (method_exists($converter, 'shortArrayExport')) {
-                    $exportContent = $converter->shortArrayExport($dictData);
+                    $exportContent = pinyin_compact_array_export($dictData);
                 } else {
                     // 如果PinyinConverter的方法不可用，使用兼容的紧凑格式
                     $exportContent = $this->compatibleShortArrayExport($dictData);
                 }
                 
                 // 保存字典文件，保持与PinyinConverter一致的格式
-                FileUtil::writeFile($filePath, "<?php\nreturn " . $exportContent . ";\n");
+                write_to_file($filePath, "<?php\nreturn " . $exportContent . ";\n");
                 
                 error_log("[BackgroundTaskManager] 字符 '{$char}' 已添加到 {$dictType} 字典 ({$toneType})");
                 
@@ -429,8 +428,8 @@ class BackgroundTaskManager
      */
     private function compatibleShortArrayExport($array)
     {
-        // 使用 PinyinHelper 统一管理数组序列化
-        return PinyinHelper::compactArrayExport($array);
+        // 使用 pinyin_compact_array_export 统一管理数组序列化
+        return pinyin_compact_array_export($array);
     }
 
     /**
@@ -440,8 +439,8 @@ class BackgroundTaskManager
      */
     private function removeToneFromPinyin($pinyin)
     {
-        // 使用 PinyinHelper 统一管理声调移除逻辑
-        return PinyinHelper::removeTone($pinyin);
+        return remove_tone($pinyin);
+        return remove_tone($pinyin);
     }
     
     /**
@@ -494,12 +493,12 @@ class BackgroundTaskManager
     {
         $unihanDictPath = __DIR__ . '/../data/unihan/all_unihan_pinyin.php';
         
-        if (!FileUtil::fileExists($unihanDictPath)) {
+        if (!is_file_exists($unihanDictPath)) {
             return null;
         }
         
         try {
-            $unihanDict = FileUtil::requireFile($unihanDictPath);
+            $unihanDict = require_file($unihanDictPath);
             $unihanDict = is_array($unihanDict) ? $unihanDict : [];
             
             // 在Unihan字典中查找字符
@@ -561,12 +560,12 @@ class BackgroundTaskManager
     {
         $notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
         
-        if (!FileUtil::fileExists($notFoundPath)) {
+        if (!is_file_exists($notFoundPath)) {
             return;
         }
         
         try {
-            $notFoundChars = FileUtil::requireFile($notFoundPath);
+            $notFoundChars = require_file($notFoundPath);
             $notFoundChars = is_array($notFoundChars) ? $notFoundChars : [];
             
             // 移除字符
@@ -578,7 +577,7 @@ class BackgroundTaskManager
             $notFoundChars = array_values($notFoundChars);
             
             // 保存文件
-            FileUtil::writeFile($notFoundPath, "<?php\nreturn " . var_export($notFoundChars, true) . ";\n");
+            write_to_file($notFoundPath, "<?php\nreturn " . var_export($notFoundChars, true) . ";\n");
             
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 从未找到字符文件移除字符失败: " . $e->getMessage());
@@ -634,7 +633,7 @@ class BackgroundTaskManager
             'failed' => 0
         ];
         
-        if (!FileUtil::fileExists($this->config['task_dir'])) {
+        if (!is_file_exists($this->config['task_dir'])) {
             return $stats;
         }
         
@@ -642,7 +641,7 @@ class BackgroundTaskManager
         
         foreach ($files as $file) {
             try {
-                $content = FileUtil::readFile($file);
+                $content = read_file_data($file);
                 $task = json_decode($content, true);
                 
                 if ($task) {

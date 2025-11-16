@@ -1,5 +1,6 @@
 <?php
 namespace tekintian\pinyin;
+
 /**
  * 合并拼音字典
  * 配置crontab：
@@ -10,5 +11,5 @@ namespace tekintian\pinyin;
 require 'PinyinConverter.php';
 $converter = new PinyinConverter();
 $result = $converter->executeMerge();
-// 打印合并结果（可选）
-echo "合并结果：" . json_encode($result, JSON_UNESCAPED_UNICODE) . "\n";
+// 打印合并结果（仅在调试模式下输出）
+pinyin_debug("合并结果：" . json_encode($result, JSON_UNESCAPED_UNICODE), 'info');

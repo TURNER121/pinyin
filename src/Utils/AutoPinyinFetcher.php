@@ -111,7 +111,7 @@ class AutoPinyinFetcher {
                 if (preg_match_all('/<span[^>]+>([a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+)<span/i', $pyContent, $matches)) {
                     foreach ($matches[1] as $pinyin) {
                         $pinyin = trim($pinyin);
-                        if (!empty($pinyin) && self::isValidPinyin($pinyin)) {
+                        if (!empty($pinyin) && is_valid_pinyin($pinyin)) {
                             $pinyins[] = $pinyin;
                         }
                     }
@@ -124,7 +124,7 @@ class AutoPinyinFetcher {
             // 方法2：查找拼音标签
             if (preg_match('/<span[^>]*class=["\']dicpy["\'][^>]*>([^<]+)<\/span>/i', $html, $matches)) {
                 $pinyin = trim($matches[1]);
-                if (!empty($pinyin) && self::isValidPinyin($pinyin)) {
+                if (!empty($pinyin) && is_valid_pinyin($pinyin)) {
                     $pinyins[] = $pinyin;
                 }
             }
@@ -132,7 +132,7 @@ class AutoPinyinFetcher {
             // 方法3：查找拼音相关的meta信息
             if (preg_match('/<meta[^>]*name=["\']description["\'][^>]*content=["\'][^"\']*拼音[^"\']*([a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+)[^"\']*["\']/i', $html, $matches)) {
                 $pinyin = trim($matches[1]);
-                if (!empty($pinyin) && self::isValidPinyin($pinyin)) {
+                if (!empty($pinyin) && is_valid_pinyin($pinyin)) {
                     $pinyins[] = $pinyin;
                 }
             }
@@ -140,7 +140,7 @@ class AutoPinyinFetcher {
             // 方法4：查找包含拼音的特定区域
             if (preg_match('/拼音[：:]([a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ\s]+)/i', $html, $matches)) {
                 $pinyin = trim(preg_replace('/[^a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ\s]/i', '', $matches[1]));
-                if (!empty($pinyin) && self::isValidPinyin($pinyin)) {
+                if (!empty($pinyin) && is_valid_pinyin($pinyin)) {
                     $pinyins[] = $pinyin;
                 }
             }
@@ -155,17 +155,7 @@ class AutoPinyinFetcher {
         return null;
     }
     
-    /**
-     * 验证拼音格式
-     * @param string $pinyin 拼音
-     * @return bool 是否有效
-     */
-    private static function isValidPinyin($pinyin) {
-        // 基本拼音格式验证
-        return preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+$/i', $pinyin) && 
-               strlen($pinyin) >= 1 && 
-               strlen($pinyin) <= 7; // 拼音通常1-7个字符
-    }
+
     
     /**
      * 使用在线汉字字典API获取真实拼音
@@ -357,25 +347,7 @@ class AutoPinyinFetcher {
         return $results;
     }
     
-    /**
-     * 紧凑数组序列化（用于字典文件）
-     * 特殊处理：将拼音字符串转换为数组格式
-     */
-    private static function compactArrayExport($array) {
-        if (empty($array)) return '[]';
-        
-        $processedArray = [];
-        foreach ($array as $key => $value) {
-            // 特殊处理：将拼音字符串转换为数组格式
-            if (is_string($value)) {
-                $processedArray[$key] = array_map('trim', explode(',', $value));
-            } else {
-                $processedArray[$key] = $value;
-            }
-        }
-        
-        return PinyinHelper::compactArrayExport($processedArray);
-    }
+
 
     /**
      * 生成自定义字典文件
@@ -389,31 +361,16 @@ class AutoPinyinFetcher {
         foreach ($pinyinResults as $result) {
             if ($result['pinyin'] && $result['pinyin'] !== '?') {
                 // 去除声调（如果需要）
-                $pinyin = $withTone ? $result['pinyin'] : self::removeTone($result['pinyin']);
+                $pinyin = $withTone ? $result['pinyin'] : remove_tone($result['pinyin']);
                 $dict[$result['char']] = $pinyin;
             }
         }
         
         // 生成紧凑格式的PHP数组文件
         $content = "<?php\n/** 紧凑格式自定义拼音字典 生成时间：" . date('Y-m-d H:i:s') . " 条目数：" . count($dict) . " **/\nreturn ";
-        $content .= self::compactArrayExport($dict) . ";\n";
+        $content .= pinyin_compact_array_export($dict) . ";\n";
         file_put_contents($outputPath, $content);
     }
     
-    /**
-     * 去除拼音声调
-     * @param string|array $pinyin 带声调的拼音（字符串或数组）
-     * @return string|array 无声调的拼音
-     */
-    private static function removeTone($pinyin) {
-        if (is_array($pinyin)) {
-            // 如果是数组，对每个元素进行处理
-            return array_map(function($item) {
-                return PinyinHelper::removeTone($item);
-            }, $pinyin);
-        } else {
-            // 如果是字符串，直接处理
-            return PinyinHelper::removeTone($pinyin);
-        }
-    }
+
 }
