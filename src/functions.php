@@ -1,7 +1,34 @@
 <?php
 
+/**
+ * 拼音转换工具全局函数
+ * 包含全局使用的各种拼音转换的独立函数, 文件操作函数,  各种辅助函数，如调试输出、日志记录、性能监控等。
+ *
+ * @author tekintian
+ * @see https://github.com/tekintian/pinyin
+ * @link https://dev.tekin.cn
+ * @date 2025-11-01 16:00:00
+ * @version 1.0.0
+ */
+
 use tekintian\pinyin\Exception\PinyinException;
 use tekintian\pinyin\Utils\PinyinConstants;
+
+if (!function_exists('require_file')) {
+    /**
+     * 引入PHP文件
+     * @param string $file 文件路径
+     * @param mixed $default 默认返回值
+     * @return mixed
+     */
+    function require_file($file, $default = [])
+    {
+        if (!is_file_exists($file)) {
+            return $default;
+        }
+        return require_once $file;
+    }
+}
 
 if (!function_exists('pinyin_debug')) {
     /**
@@ -9,7 +36,8 @@ if (!function_exists('pinyin_debug')) {
      * @param string $message 调试信息
      * @param string $type 信息类型（info, success, error, warning）
      */
-    function pinyin_debug($message, $type = 'info') {
+    function pinyin_debug($message, $type = 'info')
+    {
         if (getenv('APP_DEBUG') === 'true') {
             $prefix = '';
             switch ($type) {
@@ -30,27 +58,29 @@ if (!function_exists('pinyin_debug')) {
     }
 }
 
-/**
- * 检查是否启用调试模式
- * @return bool
- */
 if (!function_exists('is_debug_enabled')) {
-    function is_debug_enabled() {
+    /**
+     * 检查是否启用调试模式
+     * @return bool
+     */
+    function is_debug_enabled()
+    {
         return getenv('APP_DEBUG') === 'true';
     }
 }
 
-/**
- * 记录调试日志到文件
- * @param string $message 日志信息
- * @param string $logFile 日志文件路径
- */
 if (!function_exists('log_file')) {
-    function log_file($message, $logFile = null) {
+    /**
+     * 记录调试日志到文件
+     * @param string $message 日志信息
+     * @param string $logFile 日志文件路径
+     */
+    function log_file($message, $logFile = null)
+    {
         if (is_debug_enabled()) {
             $timestamp = date('Y-m-d H:i:s');
             $logMessage = "[{$timestamp}] {$message}\n";
-            
+
             if ($logFile && is_writable(dirname($logFile))) {
                 file_put_contents($logFile, $logMessage, FILE_APPEND | LOCK_EX);
             } else {
@@ -62,24 +92,26 @@ if (!function_exists('log_file')) {
 
 // ==================== 文件操作函数 ====================
 
-/**
- * 检查文件是否存在
- * @param string $file 文件路径
- * @return bool
- */
 if (!function_exists('is_file_exists')) {
-    function is_file_exists($file) {
+    /**
+     * 检查文件是否存在
+     * @param string $file 文件路径
+     * @return bool
+     */
+    function is_file_exists($file)
+    {
         return file_exists($file) && is_file($file);
     }
 }
 
-/**
- * 读取文件内容
- * @param string $file 文件路径
- * @return string
- */
 if (!function_exists('read_file_data')) {
-    function read_file_data($file) {
+    /**
+     * 读取文件内容
+     * @param string $file 文件路径
+     * @return string
+     */
+    function read_file_data($file)
+    {
         if (!is_file_exists($file)) {
             return '';
         }
@@ -87,65 +119,279 @@ if (!function_exists('read_file_data')) {
     }
 }
 
-/**
- * 写入文件内容
- * @param string $file 文件路径
- * @param string $content 文件内容
- * @param bool $append 是否追加模式
- * @return bool
- */
 if (!function_exists('write_to_file')) {
-    function write_to_file($file, $content, $append = false) {
+    /**
+     * 写入文件内容
+     * @param string $file 文件路径
+     * @param string $content 文件内容
+     * @param bool $append 是否追加模式
+     * @return bool
+     */
+    function write_to_file($file, $content, $append = false)
+    {
         $dir = dirname($file);
         if (!is_dir($dir)) {
             create_dir($dir);
         }
-        
+
         $flags = $append ? FILE_APPEND | LOCK_EX : LOCK_EX;
         return file_put_contents($file, $content, $flags) !== false;
     }
 }
 
-/**
- * 创建目录
- * @param string $dir 目录路径
- * @param int $mode 目录权限
- * @return bool
- */
 if (!function_exists('create_dir')) {
-    function create_dir($dir, $mode = 0755) {
+    /**
+     * 创建目录
+     * @param string $dir 目录路径
+     * @param int $mode 目录权限
+     * @return bool
+     */
+    function create_dir($dir, $mode = 0755)
+    {
         if (is_dir($dir)) {
             return true;
         }
-        
+
         $parent = dirname($dir);
         if (!is_dir($parent)) {
             create_dir($parent, $mode);
         }
-        
+
         return mkdir($dir, $mode, true);
     }
 }
 
-/**
- * 引入PHP文件
- * @param string $file 文件路径
- * @param mixed $default 默认返回值
- * @return mixed
- */
-if (!function_exists('require_file')) {
-    function require_file($file, $default = []) {
-        if (!is_file_exists($file)) {
-            return $default;
+if (!function_exists('copy_file')) {
+    /**
+     * 复制单个文件
+     *
+     * @param string $sourcePath 源文件路径
+     * @param string $destinationPath 目标文件路径
+     * @return bool 复制结果
+     * @throws PinyinException 复制失败时抛出异常
+     */
+    function copy_file(string $sourcePath, string $destinationPath): bool
+    {
+        // 确保源文件存在
+        if (!is_file($sourcePath)) {
+            throw new PinyinException("Source file does not exist: {$sourcePath}", PinyinException::ERROR_FILE_NOT_FOUND);
         }
-        return require_once $file;
+
+        // 确保目标目录存在
+        $targetDir = dirname($destinationPath);
+        if (!is_dir($targetDir)) {
+            create_dir($targetDir);
+        }
+
+        // 复制文件
+        if (!@copy($sourcePath, $destinationPath)) {
+            throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('get_file_mtime')) {
+    /**
+     * 获取文件修改时间
+     *
+     * @param string $file 文件路径
+     * @return int|null 文件修改时间戳，如果文件不存在则返回null
+     */
+    function get_file_mtime($file)
+    {
+        if (!is_file($file)) {
+            return null;
+        }
+
+        return filemtime($file);
+    }
+}
+
+if (!function_exists('copy_dict')) {
+    /**
+     * 递归复制项目根目录下的data文件夹到用户指定目录
+     * 默认拷贝当前项目data目录下的所有文件到用户指定的目录
+     *
+     * @param string $dst 目标目录路径
+     * @return bool 复制结果
+     * @throws PinyinException 复制失败时抛出异常
+     */
+    function copy_dict(string $dst): bool
+    {
+        // 获取项目根目录下的data目录路径
+        $dataDir = dirname(dirname(__DIR__)) . '/data/';
+
+        // 安全检查：确保源路径确实是data目录并可以访问
+        $realDataDir = realpath($dataDir);
+
+        if ($realDataDir === false) {
+            throw new PinyinException("Failed to access data directory: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
+        }
+
+        // 验证源目录是否存在且是目录
+        if (!is_dir($dataDir)) {
+            throw new PinyinException("Source data directory does not exist or is not a directory: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
+        }
+
+        // 确保目标目录存在
+        if (!is_dir($dst)) {
+            create_dir($dst);
+        }
+
+        // 获取源目录中的所有文件和子目录
+        $files = scandir($dataDir);
+        if ($files === false) {
+            throw new PinyinException("Failed to read directory contents: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
+        }
+
+        // 递归复制文件和目录
+        foreach ($files as $file) {
+            if ($file === '.' || $file === '..') {
+                continue;
+            }
+
+            $sourcePath = $dataDir . '/' . $file;
+            $destinationPath = $dst . '/' . $file;
+
+            if (is_dir($sourcePath)) {
+                // 如果是目录，递归创建并复制
+                if (!is_dir($destinationPath)) {
+                    create_dir($destinationPath);
+                }
+
+                // 使用辅助函数递归复制子目录内容
+                if (!copy_directory($sourcePath, $destinationPath)) {
+                    return false;
+                }
+            } else {
+                // 如果是文件，直接复制
+                if (!@copy($sourcePath, $destinationPath)) {
+                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
+                }
+            }
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('copy_directory')) {
+    /**
+     * 辅助方法：递归复制目录内容
+     *
+     * @param string $src 源目录路径
+     * @param string $dst 目标目录路径
+     * @return bool 复制结果
+     * @throws PinyinException 复制失败时抛出异常
+     */
+    function copy_directory(string $src, string $dst): bool
+    {
+        // 获取源目录中的所有文件和子目录
+        $files = scandir($src);
+        if ($files === false) {
+            throw new PinyinException("Failed to read directory contents: {$src}", PinyinException::ERROR_FILE_NOT_FOUND);
+        }
+
+        foreach ($files as $file) {
+            if ($file === '.' || $file === '..') {
+                continue;
+            }
+
+            $sourcePath = $src . '/' . $file;
+            $destinationPath = $dst . '/' . $file;
+
+            if (is_dir($sourcePath)) {
+                // 如果是目录，递归创建并复制
+                if (!is_dir($destinationPath)) {
+                    create_dir($destinationPath);
+                }
+
+                if (!copy_directory($sourcePath, $destinationPath)) {
+                    return false;
+                }
+            } else {
+                // 如果是文件，直接复制
+                if (!@copy($sourcePath, $destinationPath)) {
+                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
+                }
+            }
+        }
+
+        return true;
+    }
+}
+
+if (!function_exists('delete_file')) {
+    /**
+     * 删除文件
+     *
+     * @param string $file 文件路径
+     * @return bool 删除结果
+     */
+    function delete_file(string $file): bool
+    {
+        if (!is_file($file)) {
+            return true;
+        }
+
+        return @unlink($file);
+    }
+}
+
+if (!function_exists('read_json_file')) {
+    /**
+     * 读取JSON文件并解析为数组
+     *
+     * @param string $file JSON文件路径
+     * @return array 解析后的数组
+     * @throws PinyinException 文件不存在、读取失败或解析失败时抛出异常
+     */
+    function read_json_file(string $file): array
+    {
+        $content = read_file_data($file);
+        $data = json_decode($content, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new PinyinException(
+                "Failed to parse JSON file: {$file}, error: " . json_last_error_msg(),
+                PinyinException::ERROR_INVALID_INPUT
+            );
+        }
+
+        return $data;
+    }
+}
+
+if (!function_exists('write_json_file')) {
+    /**
+     * 将数组数据写入JSON文件
+     *
+     * @param string $file JSON文件路径
+     * @param array $data 要写入的数据
+     * @param int $options JSON编码选项
+     * @return bool 写入结果
+     * @throws PinyinException 写入失败时抛出异常
+     */
+    function write_json_file(string $file, array $data, int $options = JSON_UNESCAPED_UNICODE): bool
+    {
+        $content = json_encode($data, $options);
+        if ($content === false) {
+            throw new PinyinException(
+                "Failed to encode data to JSON, error: " . json_last_error_msg(),
+                PinyinException::ERROR_INVALID_INPUT
+            );
+        }
+
+        return write_to_file($file, $content);
     }
 }
 
 // ==================== 拼音处理函数 ====================
 
 if (!function_exists('convert_to_number_tone')) {
-     /**
+    /**
      * 将拼音转换为数字声调格式（如：zhōng → zhong1）
      *
      * @param string $pinyin 带声调的拼音
@@ -160,9 +406,9 @@ if (!function_exists('convert_to_number_tone')) {
             'ō' => 'o1', 'ó' => 'o2', 'ǒ' => 'o3', 'ò' => 'o4',
             'ū' => 'u1', 'ú' => 'u2', 'ǔ' => 'u3', 'ù' => 'u4',
             'ǖ' => 'v1', 'ǘ' => 'v2', 'ǚ' => 'v3', 'ǜ' => 'v4',
-            'ü' => 'v'
+            'ü' => 'v',
         ];
-        
+
         return strtr($pinyin, $toneMap);
     }
 }
@@ -183,25 +429,25 @@ if (!function_exists('convert_from_number_tone')) {
             'o1' => 'ō', 'o2' => 'ó', 'o3' => 'ǒ', 'o4' => 'ò',
             'u1' => 'ū', 'u2' => 'ú', 'u3' => 'ǔ', 'u4' => 'ù',
             'v1' => 'ǖ', 'v2' => 'ǘ', 'v3' => 'ǚ', 'v4' => 'ǜ',
-            'v' => 'ü'
+            'v' => 'ü',
         ];
-        
+
         // 按长度从长到短排序，优先匹配长模式
-        uksort($reverseMap, function($a, $b) {
+        uksort($reverseMap, function ($a, $b) {
             return strlen($b) - strlen($a);
         });
-        
+
         return strtr($pinyin, $reverseMap);
     }
 }
 
 if (!function_exists('format_pinyin_array')) {
-     /**
+    /**
      * 格式化拼音数组（区分单字和多字空格）
      * @param array $data 原始数据
      * @return array 格式化后的数据
      */
-   function format_pinyin_array($data)
+    function format_pinyin_array($data)
     {
         $formatted = [];
         foreach ($data as $char => $pinyin) {
@@ -224,17 +470,18 @@ if (!function_exists('format_pinyin_array')) {
     }
 }
 
-/**
- * 移除拼音中的声调
- * @param string $pinyin 带声调的拼音
- * @return string 无声调的拼音
- */
 if (!function_exists('remove_tone')) {
-    function remove_tone($pinyin) {
+    /**
+     * 移除拼音中的声调
+     * @param string $pinyin 带声调的拼音
+     * @return string 无声调的拼音
+     */
+    function remove_tone($pinyin)
+    {
         if (is_array($pinyin)) {
             return array_map('remove_tone', $pinyin);
         }
-        
+
         // 声调映射表
         $toneMap = [
             'ā' => 'a', 'á' => 'a', 'ǎ' => 'a', 'à' => 'a',
@@ -243,32 +490,33 @@ if (!function_exists('remove_tone')) {
             'ī' => 'i', 'í' => 'i', 'ǐ' => 'i', 'ì' => 'i',
             'ū' => 'u', 'ú' => 'u', 'ǔ' => 'u', 'ù' => 'u',
             'ǖ' => 'v', 'ǘ' => 'v', 'ǚ' => 'v', 'ǜ' => 'v',
-            'ü' => 'v'
+            'ü' => 'v',
         ];
-        
+
         return strtr($pinyin, $toneMap);
     }
 }
 
-/**
- * 验证拼音格式是否有效
- * @param string $pinyin 拼音字符串
- * @param bool $strict 是否严格模式
- * @return bool
- */
 if (!function_exists('is_valid_pinyin')) {
-    function is_valid_pinyin($pinyin, $strict = false) {
+    /**
+     * 验证拼音格式是否有效
+     * @param string $pinyin 拼音字符串
+     * @param bool $strict 是否严格模式
+     * @return bool
+     */
+    function is_valid_pinyin($pinyin, $strict = false)
+    {
         if (mb_strlen($pinyin) === 0) {
             return false;
         }
-        
+
         // 基本拼音格式验证
         $basicValid = preg_match('/^[a-zāáǎàōóǒòēéěèīíǐìūúǔùüǖǘǚǜ]+$/i', $pinyin);
-        
+
         if (!$strict || !$basicValid) {
             return $basicValid;
         }
-        
+
         // 严格验证：检查声调组合规则
         return validate_pinyin_tone_rules($pinyin);
     }
@@ -276,12 +524,12 @@ if (!function_exists('is_valid_pinyin')) {
 
 if (!function_exists('pinyin_batch_process')) {
 /**
-     * 批量处理拼音数组
-     *
-     * @param array $pinyinArray 拼音数组
-     * @param callable $processor 处理函数
-     * @return array 处理后的数组
-     */
+ * 批量处理拼音数组
+ *
+ * @param array $pinyinArray 拼音数组
+ * @param callable $processor 处理函数
+ * @return array 处理后的数组
+ */
     function pinyin_batch_process($pinyinArray, $processor)
     {
         return array_map($processor, $pinyinArray);
@@ -289,7 +537,7 @@ if (!function_exists('pinyin_batch_process')) {
 }
 
 if (!function_exists('pinyin_sort')) {
- /**
+    /**
      * 拼音排序（按字母顺序）
      *
      * @param array $pinyinArray 拼音数组
@@ -298,10 +546,10 @@ if (!function_exists('pinyin_sort')) {
      */
     function pinyin_sort($pinyinArray, $ignoreTone = true)
     {
-        $processedArray = $ignoreTone 
-            ? pinyin_batch_process($pinyinArray, 'remove_tone')
-            : $pinyinArray;
-        
+        $processedArray = $ignoreTone
+        ? pinyin_batch_process($pinyinArray, 'remove_tone')
+        : $pinyinArray;
+
         array_multisort($processedArray, $pinyinArray);
         return $pinyinArray;
     }
@@ -315,32 +563,33 @@ if (!function_exists('check_pinyin_format_consistency')) {
      * @param bool $withTone 是否带声调
      * @return array 一致性检查结果
      */
-    function check_pinyin_format_consistency($pinyinArray, $withTone) {
+    function check_pinyin_format_consistency($pinyinArray, $withTone)
+    {
         $result = [
             'consistent' => true,
-            'suggestions' => []
+            'suggestions' => [],
         ];
-        
+
         $firstPinyin = $pinyinArray[0];
         $firstHasSpace = str_contains($firstPinyin, ' ');
-        
+
         foreach ($pinyinArray as $pinyin) {
             $hasSpace = str_contains($pinyin, ' ');
             if ($hasSpace !== $firstHasSpace) {
                 $result['consistent'] = false;
-                $result['suggestions'] = array_map(function($p) use ($withTone) {
+                $result['suggestions'] = array_map(function ($p) use ($withTone) {
                     return trim($p); // 简化处理，直接返回清理后的拼音
                 }, $pinyinArray);
                 break;
             }
         }
-        
+
         return $result;
     }
 }
 
 if (!function_exists('validate_pinyin_tone_rules')) {
-      /**
+    /**
      * 验证拼音声调组合规则
      *
      * @param string $pinyin 待验证的拼音
@@ -349,16 +598,16 @@ if (!function_exists('validate_pinyin_tone_rules')) {
     function validate_pinyin_tone_rules($pinyin)
     {
         // 检查是否包含多个声调符号
-        $toneChars = ['ā', 'á', 'ǎ', 'à', 'ē', 'é', 'ě', 'è', 'ī', 'í', 'ǐ', 'ì', 
-                     'ō', 'ó', 'ǒ', 'ò', 'ū', 'ú', 'ǔ', 'ù', 'ǖ', 'ǘ', 'ǚ', 'ǜ'];
-        
+        $toneChars = ['ā', 'á', 'ǎ', 'à', 'ē', 'é', 'ě', 'è', 'ī', 'í', 'ǐ', 'ì',
+            'ō', 'ó', 'ǒ', 'ò', 'ū', 'ú', 'ǔ', 'ù', 'ǖ', 'ǘ', 'ǚ', 'ǜ'];
+
         $toneCount = 0;
         foreach ($toneChars as $toneChar) {
             if (mb_substr_count($pinyin, $toneChar) > 0) {
                 $toneCount++;
             }
         }
-        
+
         // 一个拼音最多只能有一个声调符号
         return $toneCount <= 1;
     }
@@ -371,20 +620,21 @@ if (!function_exists('pinyin_validate')) {
      * @param bool $withTone 是否带声调
      * @return array 问题列表
      */
-    function pinyin_validate($pinyin, $withTone) {
+    function pinyin_validate($pinyin, $withTone)
+    {
         $issues = [];
-        
+
         // 检查是否为空
         if (empty(trim($pinyin))) {
             $issues[] = '拼音为空';
             return $issues;
         }
-        
+
         // 使用 is_valid_pinyin 进行更严格的验证
         if (!is_valid_pinyin($pinyin, true)) {
             $issues[] = '拼音格式无效或不符合声调规则';
         }
-        
+
         // 检查声调一致性
         if ($withTone) {
             // 应该包含声调符号
@@ -397,28 +647,29 @@ if (!function_exists('pinyin_validate')) {
                 $issues[] = '无声调模式下包含声调符号';
             }
         }
-        
+
         // 检查空格使用（单字不应该有空格，多字应该有空格）
         $wordLen = mb_strlen($pinyin, 'UTF-8');
         if ($wordLen === 1 && str_contains($pinyin, ' ')) {
             $issues[] = '单字拼音不应包含空格';
         }
-        
+
         return $issues;
     }
 }
 
-/**
- * 格式化拼音数组
- * @param array $data 拼音数据数组
- * @return array 格式化后的数组
- */
 if (!function_exists('pinyin_format_array')) {
-    function pinyin_format_array($data) {
+    /**
+     * 格式化拼音数组
+     * @param array $data 拼音数据数组
+     * @return array 格式化后的数组
+     */
+    function pinyin_format_array($data)
+    {
         if (!is_array($data)) {
             return [];
         }
-        
+
         $result = [];
         foreach ($data as $key => $value) {
             if (is_array($value)) {
@@ -427,18 +678,19 @@ if (!function_exists('pinyin_format_array')) {
                 $result[$key] = trim($value);
             }
         }
-        
+
         return $result;
     }
 }
 
-/**
- * 紧凑数组导出（用于生成PHP数组代码）
- * @param array $array 数组数据
- * @return string PHP数组代码
- */
 if (!function_exists('pinyin_compact_array_export')) {
-    function pinyin_compact_array_export($array) {
+    /**
+     * 紧凑数组导出（用于生成PHP数组代码）
+     * @param array $array 数组数据
+     * @return string PHP数组代码
+     */
+    function pinyin_compact_array_export($array)
+    {
         if (empty($array)) {
             return '[]';
         }
@@ -466,7 +718,7 @@ if (!function_exists('pinyin_compact_array_export')) {
 }
 
 if (!function_exists('pinyin_similarity')) {
-     /**
+    /**
      * 拼音相似度比较
      *
      * @param string $pinyin1 第一个拼音
@@ -480,24 +732,24 @@ if (!function_exists('pinyin_similarity')) {
             $pinyin1 = remove_tone($pinyin1);
             $pinyin2 = remove_tone($pinyin2);
         }
-        
+
         $len1 = mb_strlen($pinyin1);
         $len2 = mb_strlen($pinyin2);
-        
+
         if ($len1 === 0 || $len2 === 0) {
             return 0.0;
         }
-        
+
         // 简单的编辑距离相似度计算
         $maxLen = max($len1, $len2);
         $distance = levenshtein($pinyin1, $pinyin2);
-        
+
         return 1 - ($distance / $maxLen);
     }
 }
 
 if (!function_exists('pinyin_normalize_format')) {
-     /**
+    /**
      * 标准化拼音格式
      * @param string $pinyin 拼音
      * @param bool $withTone 是否带声调
@@ -525,7 +777,7 @@ if (!function_exists('pinyin_normalize_format')) {
     }
 }
 if (!function_exists('pinyin_parse_options')) {
-     /**
+    /**
      * 解析拼音选项
      * @param mixed $pinyin 拼音数据
      * @return array 拼音选项数组
@@ -574,7 +826,7 @@ if (!function_exists('get_first_pinyin')) {
     }
 }
 
-if (!function_exists('pinyin_chinese_number_to_arabic')) {
+if (!function_exists('chinese_number_to_arabic')) {
     /**
      * 将字符串中的中文数字（含大小写、单位、特殊数字）转换为阿拉伯数字
      * 支持场景：
@@ -586,7 +838,8 @@ if (!function_exists('pinyin_chinese_number_to_arabic')) {
      * @param string $str 待转换的字符串（支持含中文、英文、标点等混合内容）
      * @return string 转换后的字符串
      */
-    function pinyin_chinese_number_to_arabic($str) {
+    function chinese_number_to_arabic($str)
+    {
         // 中文数字映射表：包含小写、大写、单位及特殊数字
         $numMap = [
             // 小写数字及单位
@@ -674,7 +927,7 @@ if (!function_exists('pinyin_chinese_number_to_arabic')) {
 }
 
 if (!function_exists('pinyin_process_spaces')) {
- /**
+    /**
      * 处理拼音中的空格
      *
      * @param string $pinyin 原始拼音
@@ -726,7 +979,7 @@ if (!function_exists('is_homophone')) {
 }
 
 if (!function_exists('pinyin_get_initial')) {
-     /**
+    /**
      * 获取拼音的首字母（用于拼音缩写）
      *
      * @param string $pinyin 拼音字符串
@@ -737,7 +990,7 @@ if (!function_exists('pinyin_get_initial')) {
         if (empty($pinyin)) {
             return '';
         }
-        
+
         // 移除声调并取第一个字符
         $noTone = remove_tone($pinyin);
         return mb_substr($noTone, 0, 1);
@@ -776,230 +1029,3 @@ if (!function_exists('filter_pure_chinese')) {
         }
     }
 }
-
-if (!function_exists('copy_file')) {
-    /**
-     * 复制单个文件
-     *
-     * @param string $sourcePath 源文件路径
-     * @param string $destinationPath 目标文件路径
-     * @return bool 复制结果
-     * @throws PinyinException 复制失败时抛出异常
-     */
-    function copy_file(string $sourcePath, string $destinationPath): bool
-    {
-        // 确保源文件存在
-        if (!is_file($sourcePath)) {
-            throw new PinyinException("Source file does not exist: {$sourcePath}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        // 确保目标目录存在
-        $targetDir = dirname($destinationPath);
-        if (!is_dir($targetDir)) {
-            create_dir($targetDir);
-        }
-        
-        // 复制文件
-        if (!@copy($sourcePath, $destinationPath)) {
-            throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        return true;
-    }
-}
-
-if (!function_exists('get_file_mtime')) {
-      /**
-     * 获取文件修改时间
-     *
-     * @param string $file 文件路径
-     * @return int|null 文件修改时间戳，如果文件不存在则返回null
-     */
-    function get_file_mtime($file)
-    {
-        if (!is_file($file)) {
-            return null;
-        }
-
-        return filemtime($file);
-    }
-}
-
-if (!function_exists('copy_dict')) {
-    /**
-     * 递归复制项目根目录下的data文件夹到用户指定目录
-     * 默认拷贝当前项目data目录下的所有文件到用户指定的目录
-     * 
-     * @param string $dst 目标目录路径
-     * @return bool 复制结果
-     * @throws PinyinException 复制失败时抛出异常
-     */
-    function copy_dict(string $dst): bool
-    {
-        // 获取项目根目录下的data目录路径
-        $dataDir = dirname(dirname(__DIR__)) . '/data/';
-        
-        // 安全检查：确保源路径确实是data目录并可以访问
-        $realDataDir = realpath($dataDir);
-        
-        if ($realDataDir === false) {
-            throw new PinyinException("Failed to access data directory: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        // 验证源目录是否存在且是目录
-        if (!is_dir($dataDir)) {
-            throw new PinyinException("Source data directory does not exist or is not a directory: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        // 确保目标目录存在
-        if (!is_dir($dst)) {
-            create_dir($dst);
-        }
-        
-        // 获取源目录中的所有文件和子目录
-        $files = scandir($dataDir);
-        if ($files === false) {
-            throw new PinyinException("Failed to read directory contents: {$dataDir}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        // 递归复制文件和目录
-        foreach ($files as $file) {
-            if ($file === '.' || $file === '..') {
-                continue;
-            }
-            
-            $sourcePath = $dataDir . '/' . $file;
-            $destinationPath = $dst . '/' . $file;
-            
-            if (is_dir($sourcePath)) {
-                // 如果是目录，递归创建并复制
-                if (!is_dir($destinationPath)) {
-                    create_dir($destinationPath);
-                }
-                
-                // 使用辅助函数递归复制子目录内容
-                if (!copy_directory($sourcePath, $destinationPath)) {
-                    return false;
-                }
-            } else {
-                // 如果是文件，直接复制
-                if (!@copy($sourcePath, $destinationPath)) {
-                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
-                }
-            }
-        }
-        
-        return true;
-    }
-}
-
-if (!function_exists('copy_directory')) {
-    /**
-     * 辅助方法：递归复制目录内容
-     * 
-     * @param string $src 源目录路径
-     * @param string $dst 目标目录路径
-     * @return bool 复制结果
-     * @throws PinyinException 复制失败时抛出异常
-     */
-    function copy_directory(string $src, string $dst): bool
-    {
-        // 获取源目录中的所有文件和子目录
-        $files = scandir($src);
-        if ($files === false) {
-            throw new PinyinException("Failed to read directory contents: {$src}", PinyinException::ERROR_FILE_NOT_FOUND);
-        }
-        
-        foreach ($files as $file) {
-            if ($file === '.' || $file === '..') {
-                continue;
-            }
-            
-            $sourcePath = $src . '/' . $file;
-            $destinationPath = $dst . '/' . $file;
-            
-            if (is_dir($sourcePath)) {
-                // 如果是目录，递归创建并复制
-                if (!is_dir($destinationPath)) {
-                    create_dir($destinationPath);
-                }
-                
-                if (!copy_directory($sourcePath, $destinationPath)) {
-                    return false;
-                }
-            } else {
-                // 如果是文件，直接复制
-                if (!@copy($sourcePath, $destinationPath)) {
-                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
-                }
-            }
-        }
-        
-        return true;
-    }
-}
-
-  if (!function_exists('delete_file')) {
-    /**
-     * 删除文件
-     *
-     * @param string $file 文件路径
-     * @return bool 删除结果
-     */
-     function delete_file(string $file): bool
-    {
-        if (!is_file($file)) {
-            return true;
-        }
-
-        return @unlink($file);
-    }
-  }
-   
-  if (!function_exists('read_json_file')) {
-   /**
-     * 读取JSON文件并解析为数组
-     *
-     * @param string $file JSON文件路径
-     * @return array 解析后的数组
-     * @throws PinyinException 文件不存在、读取失败或解析失败时抛出异常
-     */
-     function read_json_file(string $file): array
-    {
-        $content = read_file_data($file);
-        $data = json_decode($content, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new PinyinException(
-                "Failed to parse JSON file: {$file}, error: " . json_last_error_msg(),
-                PinyinException::ERROR_INVALID_INPUT
-            );
-        }
-
-        return $data;
-    }
-  }
-
-  if (!function_exists('write_json_file')) {
-    /**
-     * 将数组数据写入JSON文件
-     *
-     * @param string $file JSON文件路径
-     * @param array $data 要写入的数据
-     * @param int $options JSON编码选项
-     * @return bool 写入结果
-     * @throws PinyinException 写入失败时抛出异常
-     */
-     function write_json_file(string $file, array $data, int $options = JSON_UNESCAPED_UNICODE): bool
-    {
-        $content = json_encode($data, $options);
-        if ($content === false) {
-            throw new PinyinException(
-                "Failed to encode data to JSON, error: " . json_last_error_msg(),
-                PinyinException::ERROR_INVALID_INPUT
-            );
-        }
-
-        return write_to_file($file, $content);
-    }
- }

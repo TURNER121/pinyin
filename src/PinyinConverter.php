@@ -6,8 +6,17 @@ use tekintian\pinyin\Exception\PinyinException;
 use tekintian\pinyin\Utils\PinyinConstants;
 
 /**
- * AI自学习汉字转拼音工具
+ * 汉字转拼音工具
+ * 一个功能强大的汉字转拼音工具，支持自定义映射、特殊字符处理、自动学习功能和多音字处理。
+ * 基于权威的Unihan数据库，提供完整的汉字拼音转换解决方案。
+ * 
  * 支持：特殊字符精准处理+自定义替换+灵活参数传递
+ * 
+ * @author tekintian
+ * @see https://github.com/tekintian/pinyin
+ * @link https://dev.tekin.cn
+ * @date 2025-11-01 16:00:00
+ * @version 1.0.0
  */
 class PinyinConverter implements ConverterInterface {
     /**
@@ -2671,7 +2680,7 @@ class PinyinConverter implements ConverterInterface {
         $enableChineseToArabic = getenv('ENABLE_CHINESE_TO_ARABIC') ?? true;
         if ($enableChineseToArabic) {
             // 中文数字转阿拉伯数字
-            $text = pinyin_chinese_number_to_arabic($text);
+            $text = chinese_number_to_arabic($text);
         }
         
         // 对于包含特殊字符的文本，先预处理特殊字符 ，将所有非字母、数字、空格的字符替换为分隔符
