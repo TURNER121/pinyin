@@ -92,7 +92,7 @@ try {
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>修复版拼音测试</title>
+    <title>拼音测试</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
         .success { color: green; }
@@ -106,7 +106,7 @@ try {
     </style>
 </head>
 <body>
-    <h1>修复版拼音转换测试</h1>
+    <h1>拼音转换测试</h1>
     
     <div class="test">
         <h2>初始化状态</h2>
