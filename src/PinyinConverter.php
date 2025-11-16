@@ -2569,7 +2569,7 @@ class PinyinConverter implements ConverterInterface {
      * @param bool $retJson 是否返回json格式
      * @return string|array 统计信息
      */
-    public function getStatistics($retJson=false):string|array
+    public function getStatistics($retJson=false)
     {
         $stats = [
             'dictionaries' => [],
