@@ -204,9 +204,10 @@ composer test
 - [Unicode Unihan数据库](https://www.unicode.org/charts/unihan.html)
 - [Composer包页面](https://packagist.org/packages/tekintian/pinyin)
 - [GitHub仓库](https://github.com/tekintian/pinyin)
+- [软件定制开发](https://dev.tekin.cn)
 
 ---
 
 **版本**: 1.0.0  
 **最后更新**: 2025-11-16  
-**维护者**: tekintian
+**维护者**: tekintian  https://dev.tekin.cn
