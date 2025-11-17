@@ -514,6 +514,11 @@ class PinyinConverter implements ConverterInterface {
         $path = $this->config['dict'][$dictType][$type];
         // 注意这里加载的字典数据就是原始数据， 是格式化后的数据
         $data = is_file_exists($path) ? require_file($path) : [];
+        
+        // 确保数据是数组格式
+        if (!is_array($data)) {
+            $data = [];
+        }
 
         $this->dicts[$dictType][$type] = $data;
     }
@@ -543,7 +548,15 @@ class PinyinConverter implements ConverterInterface {
     private function initCustomMultiWords() {
         foreach (['with_tone', 'no_tone'] as $type) {
             $words = [];
-            foreach ($this->dicts['custom'][$type] as $word => $pinyin) {
+            $customDict = $this->dicts['custom'][$type];
+            
+            // 确保自定义字典是数组
+            if (!is_array($customDict)) {
+                $this->customMultiWords[$type] = $words;
+                continue;
+            }
+            
+            foreach ($customDict as $word => $pinyin) {
                 $wordLen = mb_strlen($word, 'UTF-8');
                 if ($wordLen > 1 && trim($word) !== '') {
                     $words[] = [
