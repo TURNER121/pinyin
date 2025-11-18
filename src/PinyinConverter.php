@@ -2012,6 +2012,10 @@ class PinyinConverter implements ConverterInterface {
             }
             $path = $this->config['dict']['self_learn'][$type];
             $existing = require_file($path);
+            // 确保 $existing 是数组类型
+            if (!is_array($existing)) {
+                $existing = [];
+            }
             $merged = array_merge($existing, $this->learnedChars[$type]);
             write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($merged) . ";\n");
             $this->dicts['self_learn'][$type] = $merged;
