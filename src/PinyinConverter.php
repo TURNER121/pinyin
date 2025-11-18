@@ -191,6 +191,18 @@ class PinyinConverter implements ConverterInterface {
      * @var array
      */
     private $cacheAccessTime = [];
+    
+    /**
+     * 启动时间（用于性能监控）
+     * @var float
+     */
+    private $startTime;
+    
+    /**
+     * 总转换次数（用于统计）
+     * @var int
+     */
+    private $totalConversions = 0;
 
     /**
      * 频率数据是否已修改（需要在析构函数中保存）
@@ -252,6 +264,7 @@ class PinyinConverter implements ConverterInterface {
      * @param array $options 自定义配置
      */
     public function __construct($options = []) {
+        $this->startTime = microtime(true);
         $this->config = array_replace_recursive($this->config, $options);
         $this->cache = [];
         $this->finalCharMap = $this->config['special_char']['default_map'];
@@ -983,6 +996,7 @@ class PinyinConverter implements ConverterInterface {
         if (!empty($needMerge)) {
             error_log("[PinyinConverter] 需要合并的字典：" . implode(',', array_keys($needMerge)));
         }
+        return !empty($needMerge);
     }
 
     /**
@@ -2192,6 +2206,14 @@ class PinyinConverter implements ConverterInterface {
         $specialCharParam = [],
         array $polyphoneTempMap = []
     ): string {
+        // 输入类型验证
+        if (!is_string($text)) {
+            throw new InvalidArgumentException('Input text must be a string');
+        }
+        
+        // 增加转换计数
+        $this->totalConversions++;
+        
         $charConfig = $this->parseCharParam($specialCharParam);
         // 仅在 delete 模式下执行预处理（避免干扰 replace 模式）
         if ($charConfig['mode'] === 'delete') {
@@ -2290,6 +2312,11 @@ class PinyinConverter implements ConverterInterface {
 
         //$finalResult = str_replace('%', '', $finalResult);
 
+        // 如果需要带声调，转换为数字声调格式
+        if ($withTone) {
+            $finalResult = convert_to_number_tone($finalResult);
+        }
+        
         // 缓存结果
         $this->cache[$cacheKey] = $finalResult;
         
@@ -2486,6 +2513,7 @@ class PinyinConverter implements ConverterInterface {
             'memory_usage' => $this->analyzeMemoryUsage(),
             'dict_loading' => $this->analyzeDictLoading(),
             'optimization_suggestions' => $this->generateOptimizationSuggestions(),
+            'execution_time' => microtime(true) - $this->startTime,
             'timestamp' => time()
         ];
         
@@ -2633,6 +2661,7 @@ class PinyinConverter implements ConverterInterface {
     public function getStatistics($retJson=false)
     {
         $stats = [
+            'total_conversions' => $this->totalConversions ?? 0,
             'dictionaries' => [],
             'cache' => [
                 'size' => count($this->cache),
