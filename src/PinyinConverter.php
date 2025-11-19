@@ -401,7 +401,7 @@ class PinyinConverter implements ConverterInterface {
      */
     private function isCliEnvironment(): bool {
         return php_sapi_name() === 'cli';
-    }
+}
     
     /**
      * 在子进程中执行迁移检查
@@ -606,7 +606,17 @@ class PinyinConverter implements ConverterInterface {
         $data = is_file_exists($path) ? require_file($path) : [];
         $this->dicts['custom'][$type] = is_array($data) ? $data : [];
     }
-
+     /**
+      * clearCache方法
+      * 清空缓存
+      * 清空缓存，包括自定义单字/多字缓存和转换结果缓存
+      * @return void
+      */
+     public function clearCache() {
+        $this->cache = [];
+        $this->cacheAccessTime = [];
+        pinyin_debug("缓存已清空", 'info');
+    }
     /**
      * 动态添加自定义拼音（区分单字/多字空格处理）
      * @param string $char 汉字/词语
@@ -649,7 +659,32 @@ class PinyinConverter implements ConverterInterface {
         // 最后更新多字词语缓存
         $this->initCustomMultiWords();
         
+        // 清除缓存以确保后续转换使用最新的自定义拼音
+        $this->clearCache();
+        
         pinyin_debug("已添加自定义拼音：{$char} → " . implode('/', $pinyinArray), 'success');
+    }
+
+    /**
+     * 删除自定义拼音
+     * @param string $char 汉字/词语
+     * @param bool $withTone 是否带声调
+     */
+    public function removeCustomPinyin($char, $withTone = false) {
+        $type = $withTone ? 'with_tone' : 'no_tone';
+        $this->loadCustomDict($withTone);
+
+        if (isset($this->dicts['custom'][$type][$char])) {
+            unset($this->dicts['custom'][$type][$char]);
+            $path = $this->config['dict']['custom'][$type];
+            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['custom'][$type]) . ";\n");
+            $this->initCustomMultiWords();
+            
+            // 清除缓存以确保后续转换使用最新的自定义拼音
+            $this->clearCache();
+            
+            pinyin_debug("已删除自定义拼音：{$char}", 'success');
+        }
     }
 
     /**
@@ -700,25 +735,6 @@ class PinyinConverter implements ConverterInterface {
         $this->flushDelayedWrite('with_tone');
         $this->flushDelayedWrite('no_tone');
     }
-
-    /**
-     * 删除自定义拼音
-     * @param string $char 汉字/词语
-     * @param bool $withTone 是否带声调
-     */
-    public function removeCustomPinyin($char, $withTone = false) {
-        $type = $withTone ? 'with_tone' : 'no_tone';
-        $this->loadCustomDict($withTone);
-
-        if (isset($this->dicts['custom'][$type][$char])) {
-            unset($this->dicts['custom'][$type][$char]);
-            $path = $this->config['dict']['custom'][$type];
-            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['custom'][$type]) . ";\n");
-            $this->initCustomMultiWords();
-            pinyin_debug("已删除自定义拼音：{$char}", 'success');
-        }
-    }
-
     /**
      * 检查和修复自定义字典
      * @param bool $withTone 是否带声调
@@ -2016,7 +2032,7 @@ class PinyinConverter implements ConverterInterface {
      * 更新字符/词语使用频率（统计所有转换的字词）
      * @param string $char 汉字字符或词语
      * @param string $type 拼音类型（'with_tone' 或 'no_tone'）
-     */
+*/
     private function updateCharFrequency($char, $type) {
         // 确保频率数据已加载
         $this->loadFrequency();
@@ -2266,18 +2282,15 @@ class PinyinConverter implements ConverterInterface {
             // 删除模式下，只保留纯中文, 字母拼音数字字符和用户定义的允许的特殊字符 
             $text = preg_replace('/[^'. PinyinConstants::FULL_CHINESE_RANGE .  $this->config['special_char']['delete_allow'].']+/u', ' ', $text);
         }
-
+    
         $cacheKey = md5(json_encode([$text, $separator, $withTone, $charConfig, $polyphoneTempMap]));
-
-        // 缓存检查
-        if (isset($this->cache[$cacheKey])) {
-            // 移到数组末尾，实现LRU策略
-            $value = $this->cache[$cacheKey];
-            unset($this->cache[$cacheKey]);
-            $this->cache[$cacheKey] = $value;
-            return $value;
+    
+        // 缓存检查 - 使用专用的缓存获取方法
+        $cachedResult = $this->smartCacheGet($cacheKey);
+        if ($cachedResult !== null) {
+            return $cachedResult;
         }
-
+    
         // 多字词语替换
         list($textAfterMultiWords, $processedWords) = $this->replaceCustomMultiWords($text, $withTone, $separator);
         
@@ -2285,9 +2298,12 @@ class PinyinConverter implements ConverterInterface {
         if (!preg_match(PinyinConstants::getChinesePattern('full'), $textAfterMultiWords)) {
             $textAfterMultiWords = str_replace(['[[CUSTOM_PINYIN:', ']]'], '', $textAfterMultiWords);
             $textAfterMultiWords = str_replace('[[SEPARATOR]]', $separator, $textAfterMultiWords);
-            return pinyin_trim($textAfterMultiWords, $separator);
+            $result = pinyin_trim($textAfterMultiWords, $separator);
+            // 使用专用的缓存设置方法
+            $this->smartCacheSet($cacheKey, $result);
+            return $result;
         }
-
+    
         // 处理自定义多字词语的保护标记
         $result = [];
         $customPinyinMatches = [];
@@ -2320,7 +2336,7 @@ class PinyinConverter implements ConverterInterface {
                 } else {
                     $len = mb_strlen($part, 'UTF-8');
                     $currentWord = ''; 
-
+    
                     if ($previousWasCustomPinyin && $len > 0) {
                         $result[] = '';
                     }
@@ -2338,7 +2354,7 @@ class PinyinConverter implements ConverterInterface {
             // 没有自定义拼音标记的情况
             $this->processTextPart($textAfterMultiWords, $withTone, $charConfig, $polyphoneTempMap, $result);
         }
-
+    
         // 过滤空值并拼接
         $filtered = array_filter($result, function ($item) {
             return $item !== '';
@@ -2346,7 +2362,7 @@ class PinyinConverter implements ConverterInterface {
         $finalResult = implode($separator, $filtered);
         
         $finalResult = str_replace('[[SEPARATOR]]', $separator, $finalResult);
-
+    
         // 合并连续分隔符
         if ($separator !== '') {
             $finalResult = preg_replace(
@@ -2355,20 +2371,13 @@ class PinyinConverter implements ConverterInterface {
                 $finalResult
             );
         }
-
+    
         // 去除首位空格和分隔符
         $finalResult=pinyin_trim($finalResult, $separator);
-   
-        // 缓存结果
-        $this->cache[$cacheKey] = $finalResult;
-        
-        // 维护LRU顺序并控制缓存大小
-        if (count($this->cache) > $this->config['high_freq_cache']['size']) {
-            // 删除第一个元素（最旧的）
-            reset($this->cache);
-            unset($this->cache[key($this->cache)]);
-        }
-
+       
+        // 使用专用的缓存设置方法而不是直接操作缓存数组
+        $this->smartCacheSet($cacheKey, $finalResult);
+    
         return $finalResult;
     }
     
