@@ -610,12 +610,16 @@ class PinyinConverter implements ConverterInterface {
     public function addCustomPinyin($char, $pinyin, $withTone = false) {
         $type = $withTone ? 'with_tone' : 'no_tone';
         $this->loadCustomDict($withTone);
-        $wordLen = mb_strlen($char, 'UTF-8');
+        //$wordLen = mb_strlen($char, 'UTF-8');
 
         $pinyinArray = is_array($pinyin) ? $pinyin : [$pinyin];
-        $pinyinArray = array_map(function($item) use ($wordLen) {
-            $clean = preg_replace('/[^\p{L}\p{M} ]/u', '', $item);
-            return pinyin_process_spaces($clean); // 简化处理，直接返回清理后的字符串
+        $pinyinArray = array_map(function($item) {
+            // 第一步：将数字声调转换为带声调的拼音 确保数据一致性, 如 ce4 转换为 cè
+            $withTone = convert_from_number_tone($item);
+            // 第二步：清理非拼音字符（保留字母、声调、空格）
+            $clean = preg_replace('/[^\p{L}\p{M} ]/u', '', $withTone);
+            // 第三步：处理空格（如去重、修剪等）
+            return pinyin_process_spaces($clean);
         }, $pinyinArray);
 
         $pinyinArray = array_filter($pinyinArray);
