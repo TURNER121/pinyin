@@ -12,6 +12,7 @@ return [
         ['type' => 'post', 'char' => '走', 'pinyin' => 'xíng'], // 行走
         ['type' => 'post', 'char' => '者', 'pinyin' => 'xíng'],  // 行者
         ['type' => 'pre', 'char' => '银', 'pinyin' => 'háng'],  // 银行
+        ['type' => 'post', 'char' => '长', 'pinyin' => 'háng'],  // 行长
         ['type' => 'post', 'char' => '业', 'pinyin' => 'háng'],  // 行业
         ['type' => 'post', 'char' => '列', 'pinyin' => 'háng'],  // 行列
         ['type' => 'word', 'word' => '行话', 'pinyin' => 'háng'], // 行话（行业术语）
@@ -96,11 +97,12 @@ return [
 
     // 中：zhōng（中间） vs zhòng（中奖）
     '中' => [
-        ['type' => 'post', 'char' => '间', 'pinyin' => 'zhōng'], // 中间
-        ['type' => 'post', 'char' => '心', 'pinyin' => 'zhōng'], // 中心（数据中台）
         ['type' => 'post', 'char' => '奖', 'pinyin' => 'zhòng'], // 中奖
         ['type' => 'post', 'char' => '靶', 'pinyin' => 'zhòng'], // 中靶
+        ['type' => 'post', 'char' => '了', 'pinyin' => 'zhòng'], // 中(zhòng) 了(le)
         ['type' => 'word', 'word' => '中台', 'pinyin' => 'zhōng'], // 中台（数据中台）
+        ['type' => 'post', 'char' => '间', 'pinyin' => 'zhōng'], // 中间
+        ['type' => 'post', 'char' => '心', 'pinyin' => 'zhōng'], // 中心（数据中台）
     ],
 
     // 盛：shèng（盛开） vs chéng（盛饭）
@@ -138,4 +140,13 @@ return [
         ['type' => 'post', 'char' => '客', 'pinyin' => 'shuì'],   // 说客
         ['type' => 'pre', 'char' => '游', 'pinyin' => 'shuì'],   // 游说
     ],
+    '朝'=>[
+        ['type' => 'post', 'char' => '代', 'pinyin' => 'cháo'],   // 朝(cháo) 代(dài)
+    ],
+    '调'=>[
+        ['type' => 'pre', 'char' => '声', 'pinyin' => 'diào'],   // 声调 diào
+        ['type' => 'post', 'char' => '动', 'pinyin' => 'diào'],   // 调动
+        ['type' => 'word', 'char' => '调调', 'pinyin' => 'diào'],   // diàodiào
+    ],
+    
 ];
