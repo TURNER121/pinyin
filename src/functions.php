@@ -30,12 +30,6 @@ if (!function_exists('str_contains')) {
 
 if (!function_exists('require_file')) {
     /**
-     * 引入PHP文件
-     * @param string $file 文件路径
-     * @param mixed $default 默认返回值
-     * @return mixed
-     */
-    /**
      * 引入PHP文件，提供更好的错误处理和类型安全
      * 
      * @param string $file 文件路径
@@ -53,11 +47,14 @@ if (!function_exists('require_file')) {
             return $fileCache[$file];
         }
         
-        // 安全性检查：确保文件路径有效且不包含目录遍历字符
-        if (strpos($file, '..') !== false || !is_string($file) || empty($file)) {
-            trigger_error("Invalid file path: {$file}", E_USER_WARNING);
+        // 基本验证：只检查是否为字符串且不为空
+        if (!is_string($file) || empty($file)) {
+            trigger_error("Invalid file path: empty or not a string", E_USER_WARNING);
             return $default;
         }
+        
+        // 移除严格的目录遍历检查，允许相对路径
+        // 对于这个项目，我们需要允许使用../的相对路径
         
         // 检查文件是否存在
         if (!is_file_exists($file)) {
@@ -507,7 +504,7 @@ if (!function_exists('convert_from_number_tone')) {
             'ie1' => 'iē', 'ie2' => 'ié', 'ie3' => 'iě', 'ie4' => 'iè', 'ie5' => 'ie',
             'ua1' => 'uā', 'ua2' => 'uá', 'ua3' => 'uǎ', 'ua4' => 'uà', 'ua5' => 'ua',
             'uo1' => 'uō', 'uo2' => 'uó', 'uo3' => 'uǒ', 'uo4' => 'uò', 'uo5' => 'uo',
-            'üe1' => 'üē', 'üe2' => 'üé', 'üe3' => 'üě', 'üe4' => 'üè', 'üe5' => 'üe',
+'üe1' => 'üē', 'üe2' => 'üé', 'üe3' => 'üě', 'üe4' => 'üè', 'üe5' => 'üe',
 've1' => 'üē',  've2' => 'üé',  've3' => 'üě',  've4' => 'üè',  've5' => 'üe',  // v代替ü
             'iu1' => 'iū',  'iu2' => 'iú',  'iu3' => 'iǔ',  'iu4' => 'iù',  'iu5' => 'iu',  // 对应iou
             // 单元音（长度2）
@@ -786,37 +783,13 @@ if (!function_exists('pinyin_compact_array_export')) {
         if (empty($array)) {
             return '[]';
         }
-
+    
         $isAssoc = array_keys($array) !== range(0, count($array) - 1);
-        $items = [];
         $indent = str_repeat('    ', $indentLevel);
         $nextIndent = str_repeat('    ', $indentLevel + 1);
-
-        foreach ($array as $key => $value) {
-            $keyStr = $isAssoc ? "'" . str_replace("'", "\\'", $key) . "' => " : '';
-
-            // 特殊处理：如果是拼音数组（简单字符串数组），使用紧凑格式
-            if (is_array($value) && !empty($value) && 
-                array_keys($value) === range(0, count($value) - 1) && 
-                array_reduce($value, function($carry, $item) { return $carry && is_string($item); }, true)) {
-                // 这是一个简单的拼音数组，使用紧凑格式
-                $valueItems = array_map(function ($item) { 
-                    return "'" . str_replace("'", "\\'", $item) . "'"; 
-                }, $value);
-                $valueStr = '[' . implode(',', $valueItems) . ']';
-            } else if (is_array($value)) {
-                // 递归处理其他嵌套数组，传递缩进级别
-                $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
-            } else {
-                $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
-            }
-
-            $items[] = $keyStr . $valueStr;
-        }
-
-        // 对于关联数组，判断是否为多音字规则的特殊格式
+    
+        // 处理多音字规则数组的特殊格式
         if ($isAssoc) {
-            // 检查是否是顶层的多音字规则数组（键是单个汉字且值不是简单拼音数组）
             $isPolyphoneRules = true;
             foreach (array_keys($array) as $key) {
                 if (mb_strlen($key) !== 1) {
@@ -825,40 +798,62 @@ if (!function_exists('pinyin_compact_array_export')) {
                 }
             }
             
-            if ($isPolyphoneRules && count($array) > 3) {
-                // 检查第一个值是否是复杂数组（不是简单拼音数组）
-                $firstValue = reset($array);
-                if (is_array($firstValue) && !empty($firstValue) && 
-                    (array_keys($firstValue) !== range(0, count($firstValue) - 1) || 
-                     !array_reduce($firstValue, function($carry, $item) { return $carry && is_string($item); }, true))) {
-                    // 顶层多音字规则：每个汉字键单独一行
-                    $result = "[\n";
-                    foreach ($items as $item) {
-                        $result .= "    " . $item . ",\n";
+            if ($isPolyphoneRules) {
+                $result = "[
+    ";
+                foreach ($array as $key => $value) {
+                    $result .= "    '$key' => [\n";
+                    
+                    foreach ($value as $rule) {
+                        $ruleItems = [];
+                        foreach ($rule as $k => $v) {
+                            $ruleItems[] = "'$k' => '$v'";
+                        }
+                        $ruleStr = implode(', ', $ruleItems);
+                        $result .= "        [$ruleStr],\n";
                     }
-                    return rtrim($result, ",\n") . "\n]";
+                    
+                    $result = rtrim($result, ",\n") . "\n    ],\n";
                 }
+                return rtrim($result, ",\n") . "\n]";
+            }
+        }
+    
+        // 处理普通关联数组或索引数组
+        if ($isAssoc) {
+            $result = $indent . "[
+    ";
+            foreach ($array as $key => $value) {
+                $keyStr = "'" . str_replace("'", "\\'", $key) . "' => ";
+                if (is_array($value)) {
+                    $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
+                } else {
+                    $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
+                }
+                $result .= $nextIndent . $keyStr . $valueStr . ",\n";
+            }
+            return rtrim($result, ",\n") . "\n" . $indent . "]";
+        } else {
+            // 检查是否是简单拼音数组
+            if (array_reduce($array, function($carry, $item) { return $carry && is_string($item); }, true)) {
+                $items = array_map(function ($item) { 
+                    return "'" . str_replace("'", "\\'", $item) . "'"; 
+                }, $array);
+                return '[' . implode(',', $items) . ']';
             }
             
-            // 其他关联数组（包括普通字典）：保持键值对格式
-            $result = "[\n";
-            foreach ($items as $item) {
-                $result .= "    " . $item . ",\n";
-            }
-            return rtrim($result, ",\n") . "\n]";
-        } else {
-            // 对于索引数组，根据缩进级别格式化
-            if ($indentLevel > 0) {
-                // 嵌套的索引数组：使用当前缩进级别，每个元素后加逗号
-                $result = "[\n";
-                foreach ($items as $item) {
-                    $result .= $nextIndent . $item . ",\n";
+            // 处理复杂索引数组
+            $result = $indent . "[
+    ";
+            foreach ($array as $value) {
+                if (is_array($value)) {
+                    $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
+                } else {
+                    $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
                 }
-                return rtrim($result, ",\n") . "\n" . $indent . "]";
-            } else {
-                // 顶层索引数组：保持原有格式
-                return "[\n    " . implode(",\n    ", $items) . "\n]";
+                $result .= $nextIndent . $valueStr . ",\n";
             }
+            return rtrim($result, ",\n") . "\n" . $indent . "]";
         }
     }
 }

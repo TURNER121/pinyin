@@ -1518,7 +1518,7 @@ class PinyinConverter implements ConverterInterface {
     /**
      * 获取单个汉字的拼音（单字去空格，多字保留）
      * @param string $char 汉字
-     * @param bool $withTone 是否带声调
+* @param bool $withTone 是否带声调
      * @param array $context 上下文
      * @param array $tempMap 临时映射
      * @return string 拼音
@@ -1803,11 +1803,39 @@ class PinyinConverter implements ConverterInterface {
             throw new PinyinException("多音字规则格式无效", PinyinException::ERROR_INVALID_INPUT);
         }
         
-        $this->dicts['polyphone_rules'][$char][] = $rule;
+        // 检查规则是否已存在
+        $ruleExists = false;
+        foreach ($this->dicts['polyphone_rules'][$char] as $existingRule) {
+            // 根据规则类型和内容检查是否重复
+            if (isset($existingRule['type']) && $existingRule['type'] === $rule['type']) {
+                // 根据不同的规则类型进行更具体的比较
+                if ($rule['type'] === 'word' && isset($existingRule['word'], $rule['word']) && $existingRule['word'] === $rule['word']) {
+                    $ruleExists = true;
+                    break;
+                } else if ($rule['type'] === 'pre' && isset($existingRule['char'], $rule['char']) && $existingRule['char'] === $rule['char']) {
+                    $ruleExists = true;
+                    break;
+                } else if ($rule['type'] === 'post' && isset($existingRule['char'], $rule['char']) && $existingRule['char'] === $rule['char']) {
+                    $ruleExists = true;
+                    break;
+                }
+                // 对于其他类型的规则，我们比较整个规则数组
+                else if ($existingRule === $rule) {
+                    $ruleExists = true;
+                    break;
+                }
+            }
+        }
         
-        // 保存到文件
-        $path = $this->config['dict']['polyphone_rules'];
-        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['polyphone_rules']) . ";\n");
+        // 只添加新规则并保存
+        if (!$ruleExists) {
+            $this->dicts['polyphone_rules'][$char][] = $rule;
+            
+            // 保存到文件 - 注意这里是重写整个文件，而不是追加
+            // 但因为我们只添加了新规则，所以效果上相当于"智能追加"
+            $path = $this->config['dict']['polyphone_rules'];
+            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['polyphone_rules']) . ";\n");
+        }
     }
     
     /**
@@ -2117,7 +2145,6 @@ class PinyinConverter implements ConverterInterface {
                 return '';
         }
     }
-
     /**
      * 解析特殊字符处理参数
      * @param string|array $specialCharParam 处理参数
