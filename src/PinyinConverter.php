@@ -616,8 +616,8 @@ class PinyinConverter implements ConverterInterface {
         $pinyinArray = array_map(function($item) {
             // 第一步：将数字声调转换为带声调的拼音 确保数据一致性, 如 ce4 转换为 cè
             $withTone = convert_from_number_tone($item);
-            // 第二步：清理非拼音字符（保留字母、声调、空格）
-            $clean = preg_replace('/[^\p{L}\p{M} ]/u', '', $withTone);
+            // 第二步：清理非拼音字符（保留字母、声调、空格 数字）
+            $clean = preg_replace('/[^\p{L}\p{M}0-9\s]/u', '', $withTone);
             // 第三步：处理空格（如去重、修剪等）
             return pinyin_process_spaces($clean);
         }, $pinyinArray);
@@ -2215,7 +2215,7 @@ class PinyinConverter implements ConverterInterface {
         $text = must_string($text);
         // 如果为空,直接返回
         if(empty($text)) {
-            return '';
+            return $text;
         }
         // 增加转换计数
         $this->totalConversions++;
