@@ -95,9 +95,17 @@ try {
         $slugResult = $converter->getUrlSlug($diyStr);
 
        // $result = $converter->convert(boolval(1), '', false);
-        $result = $converter->convert('䶮', '', false);
-        $result = $converter->getUrlSlug('Hello World 123');
-        $result = $converter->getUrlSlug('Test U.RL Slug!');
+        // $result = $converter->convert('䶮', '', false);
+        // $result = $converter->getUrlSlug('Hello World 123');
+        // $result = $converter->getUrlSlug('Test U.RL Slug!');
+
+        // 自定义拼音测试
+        $converter->addCustomPinyin('测试', 'ce4 shi4', true);
+        $result = $converter->convert('测试', ' ', true);
+        // 删除测试数据,避免影响其他测试
+        $converter->removeCustomPinyin('测试', true);
+
+        $results = $converter->searchByPinyin('zhong');
 
         $customOptions = [
             'special_char' => [
