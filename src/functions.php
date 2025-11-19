@@ -780,6 +780,11 @@ if (!function_exists('pinyin_compact_array_export')) {
      */
     function pinyin_compact_array_export($array, $indentLevel = 0)
     {
+        // 首先检查输入是否为数组
+        if (!is_array($array)) {
+            return '[]';
+        }
+    
         if (empty($array)) {
             return '[]';
         }
@@ -800,17 +805,25 @@ if (!function_exists('pinyin_compact_array_export')) {
             
             if ($isPolyphoneRules) {
                 $result = "[
-    ";
+        ";
                 foreach ($array as $key => $value) {
                     $result .= "    '$key' => [\n";
                     
-                    foreach ($value as $rule) {
-                        $ruleItems = [];
-                        foreach ($rule as $k => $v) {
-                            $ruleItems[] = "'$k' => '$v'";
+                    // 安全检查：确保$value是数组
+                    if (is_array($value)) {
+                        foreach ($value as $rule) {
+                            // 安全检查：确保$rule是数组
+                            if (is_array($rule)) {
+                                $ruleItems = [];
+                                foreach ($rule as $k => $v) {
+                                    // 安全检查：确保$v是字符串
+                                    $vStr = is_string($v) ? str_replace("'", "\\'", $v) : (string)$v;
+                                    $ruleItems[] = "'$k' => '$vStr'";
+                                }
+                                $ruleStr = implode(', ', $ruleItems);
+                                $result .= "        [$ruleStr],\n";
+                            }
                         }
-                        $ruleStr = implode(', ', $ruleItems);
-                        $result .= "        [$ruleStr],\n";
                     }
                     
                     $result = rtrim($result, ",\n") . "\n    ],\n";
@@ -819,16 +832,17 @@ if (!function_exists('pinyin_compact_array_export')) {
             }
         }
     
-        // 处理普通关联数组或索引数组
+        // 处理普通关联数组
         if ($isAssoc) {
             $result = $indent . "[
-    ";
+        ";
             foreach ($array as $key => $value) {
                 $keyStr = "'" . str_replace("'", "\\'", $key) . "' => ";
                 if (is_array($value)) {
                     $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
                 } else {
-                    $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
+                    // 安全处理非字符串值
+                    $valueStr = is_string($value) ? "'" . str_replace("'", "\\'", $value) . "'" : var_export($value, true);
                 }
                 $result .= $nextIndent . $keyStr . $valueStr . ",\n";
             }
@@ -844,12 +858,13 @@ if (!function_exists('pinyin_compact_array_export')) {
             
             // 处理复杂索引数组
             $result = $indent . "[
-    ";
+        ";
             foreach ($array as $value) {
                 if (is_array($value)) {
                     $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
                 } else {
-                    $valueStr = "'" . str_replace("'", "\\'", $value) . "'";
+                    // 安全处理非字符串值
+                    $valueStr = is_string($value) ? "'" . str_replace("'", "\\'", $value) . "'" : var_export($value, true);
                 }
                 $result .= $nextIndent . $valueStr . ",\n";
             }
