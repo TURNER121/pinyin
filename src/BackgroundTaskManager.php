@@ -402,7 +402,7 @@ class BackgroundTaskManager
                 $dictData[$char] = $toneType === 'with_tone' ? $pinyin : $this->removeToneFromPinyin($pinyin);
                 
                 // 使用全局函数的紧凑数组导出方法保持格式一致
-                if (method_exists($converter, 'shortArrayExport')) {
+                if (method_exists($converter, 'pinyin_compact_array_export')) {
                     $exportContent = pinyin_compact_array_export($dictData);
                 } else {
                     // 如果PinyinConverter的方法不可用，使用兼容的紧凑格式

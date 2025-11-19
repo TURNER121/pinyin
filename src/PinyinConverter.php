@@ -1857,7 +1857,7 @@ class PinyinConverter implements ConverterInterface {
             
             // 保存到文件
             $path = $this->config['dict']['polyphone_rules'];
-            write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($this->dicts['polyphone_rules']) . ";\n");
+            write_to_file($path, "<?php\nreturn " . pinyin_export_polyphone_rules($this->dicts['polyphone_rules']) . ";\n");
         }
     }
     
@@ -2093,7 +2093,7 @@ class PinyinConverter implements ConverterInterface {
         
         // 去重并保存
         $merged = array_unique(array_merge($existing, $this->notFoundChars));
-        write_to_file($path, "<?php\nreturn " . pinyin_compact_array_export($merged) . ";\n");
+        write_to_file($path, "<?php\nreturn " . pinyin_export_not_found_chars($merged) . ";\n");
         
         // 创建后台任务记录
         $this->createBackgroundTask('not_found_resolve', ['char' => $char]);
@@ -2560,6 +2560,7 @@ class PinyinConverter implements ConverterInterface {
      */
     public function getPerformanceReport(): array {
         $report = [
+            'total_conversions' => $this->totalConversions,
             'cache_efficiency' => $this->analyzeCacheEfficiency(),
             'memory_usage' => $this->analyzeMemoryUsage(),
             'dict_loading' => $this->analyzeDictLoading(),

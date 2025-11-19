@@ -771,106 +771,121 @@ if (!function_exists('pinyin_format_array')) {
     }
 }
 
-if (!function_exists('pinyin_compact_array_export')) {
+if (!function_exists('pinyin_export_polyphone_rules')) {
     /**
-     * 紧凑数组导出（用于生成PHP数组代码）
-     * @param array $array 数组数据
+     * 专门处理多音字规则数组的格式化导出
+     * @param array $array 多音字规则数组
      * @param int $indentLevel 缩进级别
-     * @return string PHP数组代码
+     * @return string 格式化后的PHP数组代码
      */
-    function pinyin_compact_array_export($array, $indentLevel = 0)
-    {
+    function pinyin_export_polyphone_rules($array, $indentLevel = 0) {
+        // 安全检查
+        if (!is_array($array)) {
+            return '[]';
+        }
+        
+        if (empty($array)) {
+            return '[]';
+        }
+        
+        $indent = str_repeat('    ', $indentLevel);
+        $nextIndent = str_repeat('    ', $indentLevel + 1);
+        $result = "[
+";
+        
+        foreach ($array as $key => $value) {
+            $result .= $nextIndent . "'$key' => [\n";
+            
+            // 安全检查：确保$value是数组
+            if (is_array($value)) {
+                foreach ($value as $rule) {
+                    // 安全检查：确保$rule是数组
+                    if (is_array($rule)) {
+                        $ruleItems = [];
+                        foreach ($rule as $k => $v) {
+                            // 安全处理值
+                            $vStr = is_string($v) ? str_replace("'", "\\'", $v) : (string)$v;
+                            $ruleItems[] = "'$k' => '$vStr'";
+                        }
+                        $ruleStr = implode(', ', $ruleItems);
+                        $result .= $nextIndent . "    [$ruleStr],\n";
+                    }
+                }
+            }
+            
+            $result = rtrim($result, ",\n") . "\n" . $nextIndent . "],\n";
+        }
+        
+        return rtrim($result, ",\n") . "\n" . $indent . "]";
+    }
+}
+
+if (!function_exists('pinyin_compact_array_export')) {
+    function pinyin_compact_array_export($array, $indentLevel = 0) {
         // 首先检查输入是否为数组
         if (!is_array($array)) {
             return '[]';
         }
-
+    
         if (empty($array)) {
             return '[]';
         }
-
+    
         $isAssoc = array_keys($array) !== range(0, count($array) - 1);
         $indent = str_repeat('    ', $indentLevel);
-        $nextIndent = str_repeat('    ', $indentLevel + 1);
-
-        // 处理多音字规则数组的特殊格式
-        if ($isAssoc) {
-            $isPolyphoneRules = true;
-            foreach (array_keys($array) as $key) {
-                if (mb_strlen($key) !== 1) {
-                    $isPolyphoneRules = false;
-                    break;
-                }
-            }
-            
-            // 增加额外判断：检查第一个值是否为规则数组格式（包含type等键）
-            if ($isPolyphoneRules && !empty($array)) {
-                $firstValue = reset($array);
-                // 修复isset()语法错误，先存储中间值
-                if (!is_array($firstValue) || empty($firstValue)) {
-                    $isPolyphoneRules = false;
-                } else {
-                    $firstRule = reset($firstValue);
-                    if (!is_array($firstRule) || !array_key_exists('type', $firstRule)) {
-                        $isPolyphoneRules = false;
-                    }
-                }
-            }
-            
-            if ($isPolyphoneRules) {
-                // 多音字规则格式处理逻辑
-                $result = "[\n";
-                foreach ($array as $key => $value) {
-                    $result .= $nextIndent . "'$key' => [\n";
-                    
-                    // 安全检查：确保$value是数组
-                    if (is_array($value)) {
-                        foreach ($value as $rule) {
-                            // 安全检查：确保$rule是数组
-                            if (is_array($rule)) {
-                                $ruleItems = [];
-                                foreach ($rule as $k => $v) {
-                                    // 安全检查：确保$v是字符串
-                                    $vStr = is_string($v) ? str_replace("'", "\\'", $v) : (string)$v;
-                                    $ruleItems[] = "'$k' => '$vStr'";
-                                }
-                                $ruleStr = implode(', ', $ruleItems);
-                                $result .= $nextIndent . "    [$ruleStr],\n";
-                            }
-                        }
-                    }
-                    
-                    $result = rtrim($result, ",\n") . "\n" . $nextIndent . "],\n";
-                }
-                return rtrim($result, ",\n") . "\n" . $indent . "]";
-            }
-        }
-
-        // 处理普通关联数组
+    
+        // 处理关联数组 - 统一为自学习字典格式
         if ($isAssoc) {
             $result = $indent . "[\n";
             foreach ($array as $key => $value) {
                 $keyStr = "'" . str_replace("'", "\\'", $key) . "' => ";
+                
+                // 对于值的处理保持一致
                 if (is_array($value)) {
-                    $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
+                    // 检查是否为简单拼音数组（优化：更宽松的验证）
+                    $isSimplePinyinArray = true;
+                    foreach ($value as $v) {
+                        if (!is_string($v)) {
+                            $isSimplePinyinArray = false;
+                            break;
+                        }
+                        // 更宽松的拼音验证，允许空格和更广泛的字符
+                        if (!preg_match('/^[a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü\s]+$/ui', $v)) {
+                            $isSimplePinyinArray = false;
+                            break;
+                        }
+                    }
+                    
+                    // 对于简单拼音数组，始终使用紧凑格式（单行）
+                    if ($isSimplePinyinArray) {
+                        $values = array_map(function($v) {
+                            return "'" . str_replace("'", "\\'", $v) . "'";
+                        }, $value);
+                        $valueStr = "[" . implode(', ', $values) . "]";
+                    } else {
+                        // 对于复杂数组，递归处理
+                        $valueStr = pinyin_compact_array_export($value, $indentLevel + 1);
+                    }
                 } else {
                     // 安全处理非字符串值
                     $valueStr = is_string($value) ? "'" . str_replace("'", "\\'", $value) . "'" : var_export($value, true);
                 }
-                $result .= $nextIndent . $keyStr . $valueStr . ",\n";
+                
+                // 保持一致的缩进格式
+                $result .= $indent . "    " . $keyStr . $valueStr . ",\n";
             }
             return rtrim($result, ",\n") . "\n" . $indent . "]";
         } else {
             // 处理索引数组
             $isSimplePinyin = true;
             foreach ($array as $value) {
-                if (!is_string($value) || !preg_match('/^[a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]+$/ui', $value)) {
+                if (!is_string($value) || !preg_match('/^[a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü\s]+$/ui', $value)) {
                     $isSimplePinyin = false;
                     break;
                 }
             }
             
-            if ($isSimplePinyin && count($array) <= 5) {
+            if ($isSimplePinyin) {
                 // 简单拼音数组的紧凑格式
                 $values = array_map(function($v) {
                     return "'" . str_replace("'", "\\'", $v) . "'";
@@ -878,6 +893,7 @@ if (!function_exists('pinyin_compact_array_export')) {
                 return "[" . implode(', ', $values) . "]";
             } else {
                 // 普通索引数组
+                $nextIndent = str_repeat('    ', $indentLevel + 1);
                 $result = $indent . "[\n";
                 foreach ($array as $value) {
                     if (is_array($value)) {
@@ -892,7 +908,40 @@ if (!function_exists('pinyin_compact_array_export')) {
             }
         }
     }
-    
+}
+
+if (!function_exists('pinyin_export_not_found_chars')) {
+    /**
+     * 专门导出 not_found_chars.php 格式的数组（每个字单独一行）
+     * @param array $chars 汉字数组
+     * @return string 格式化后的PHP数组代码
+     */
+    function pinyin_export_not_found_chars($chars) {
+        // 安全检查
+        if (!is_array($chars)) {
+            return '[]';
+        }
+        
+        if (empty($chars)) {
+            return '[]';
+        }
+        
+        $result = "[";
+        $first = true;
+        
+        foreach ($chars as $char) {
+            if ($first) {
+                $result .= "\n    ";
+                $first = false;
+            } else {
+                $result .= ",\n    ";
+            }
+            $result .= "'" . str_replace("'", "\\'", $char) . "'";
+        }
+        
+        $result .= "\n];";
+        return $result;
+    }
 }
 
 if (!function_exists('pinyin_similarity')) {
