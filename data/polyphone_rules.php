@@ -20,13 +20,14 @@ return [
 
     // 长：cháng（长度） vs zhǎng（生长/领导）
     '长' => [
-        ['type' => 'post', 'char' => '度', 'pinyin' => 'cháng'], // 长度
-        ['type' => 'post', 'char' => '短', 'pinyin' => 'cháng'], // 长短
-        ['type' => 'post', 'char' => '城', 'pinyin' => 'cháng'], // 长城
         ['type' => 'post', 'char' => '大', 'pinyin' => 'zhǎng'], // 长大
         ['type' => 'post', 'char' => '进', 'pinyin' => 'zhǎng'], // 长进
         ['type' => 'pre', 'char' => '校', 'pinyin' => 'zhǎng'],  // 校长
+        ['type' => 'pre', 'char' => '行', 'pinyin' => 'zhǎng'],  // 校长
         ['type' => 'word', 'word' => '长期', 'pinyin' => 'cháng'], // 长期
+        ['type' => 'post', 'char' => '度', 'pinyin' => 'cháng'], // 长度
+        ['type' => 'post', 'char' => '短', 'pinyin' => 'cháng'], // 长短
+        ['type' => 'post', 'char' => '城', 'pinyin' => 'cháng'], // 长城
     ],
 
     // 乐：lè（快乐） vs yuè（音乐）
