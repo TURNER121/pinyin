@@ -18,9 +18,8 @@ return [
         ['type' => 'post', 'char' => '动', 'pinyin' => 'xíng'],  // 行动  xíng dòng
         ['type' => 'post', 'char' => '走', 'pinyin' => 'xíng'],  // 行走  xíng zǒu
         ['type' => 'post', 'char' => '者', 'pinyin' => 'xíng'],  // 行者  xíng zhě
-        ['type' => 'word', 'word' => '行动', 'pinyin' => 'xing', 'weight' => '1'],  // 行动  xíng dòng
-        ['type' => 'word', 'word' => '银行', 'pinyin' => 'hang', 'weight' => '2'],  // 银行  yín háng
-        ['type' => 'word', 'word' => '行动', 'pinyin' => 'xing', 'weight' => '1']   // 行动  xíng dòng
+        ['type' => 'word', 'word' => '行动', 'pinyin' => 'xíng', 'weight' => '1'],  // 行动  xíng dòng
+        ['type' => 'word', 'word' => '银行', 'pinyin' => 'háng', 'weight' => '1'],  // 银行  yín háng
     ],
     '长' => [
         ['type' => 'post', 'char' => '大', 'pinyin' => 'zhǎng'],  // 长大  zhǎng dà
