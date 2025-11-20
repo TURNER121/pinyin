@@ -1,9 +1,10 @@
-<?php 
+<?php
+
 namespace tekintian\pinyin\Contracts;
 
 /**
  * 拼音转换接口
- * 
+ *
  * @author tekintian
  * @see https://github.com/tekintian/pinyin
  * @link https://dev.tekin.cn
@@ -112,7 +113,7 @@ interface ConverterInterface
      * @param bool $retJson 是否返回json格式
      * @return string|array 统计信息
      */
-    public function getStatistics($retJson=false);
+    public function getStatistics($retJson = false);
 
     /**
      * 搜索拼音匹配的汉字
@@ -122,5 +123,4 @@ interface ConverterInterface
      * @return array 匹配的汉字数组
      */
     public function searchByPinyin(string $pinyin, bool $exactMatch = true, int $limit = 10): array;
-    
 }

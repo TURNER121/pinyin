@@ -1,4 +1,5 @@
 <?php
+
 namespace tekintian\pinyin;
 
 use tekintian\pinyin\Utils\AutoPinyinFetcher;
@@ -15,13 +16,13 @@ class BackgroundTaskManager
      * @var array
      */
     private $config;
-    
+
     /**
      * 任务队列
      * @var array
      */
     private $taskQueue = [];
-    
+
     /**
      * 构造函数
      * @param array $config 配置数组
@@ -34,13 +35,13 @@ class BackgroundTaskManager
             'max_concurrent' => 3,
             'task_types' => []
         ], $config);
-        
+
         // 确保任务目录存在
         if (!is_file_exists($this->config['task_dir'])) {
             create_dir($this->config['task_dir']);
         }
     }
-    
+
     /**
      * 创建后台任务
      * @param string $taskType 任务类型
@@ -53,7 +54,7 @@ class BackgroundTaskManager
         if (!$this->config['enable']) {
             return false;
         }
-        
+
         $task = [
             'id' => uniqid($taskType . '_', true),
             'type' => $taskType,
@@ -64,10 +65,10 @@ class BackgroundTaskManager
             'attempts' => 0,
             'max_attempts' => 3
         ];
-        
+
         // 保存任务到文件
         $taskFile = $this->config['task_dir'] . $task['id'] . '.json';
-        
+
         try {
             write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             return true;
@@ -76,7 +77,7 @@ class BackgroundTaskManager
             return false;
         }
     }
-    
+
     /**
      * 获取待处理任务
      * @param int $limit 限制数量
@@ -85,18 +86,18 @@ class BackgroundTaskManager
     public function getPendingTasks($limit = 10)
     {
         $tasks = [];
-        
+
         if (!is_file_exists($this->config['task_dir'])) {
             return $tasks;
         }
-        
+
         $files = glob($this->config['task_dir'] . '*.json');
-        
+
         foreach ($files as $file) {
             try {
                 $content = read_file_data($file);
                 $task = json_decode($content, true);
-                
+
                 if ($task && $task['status'] === 'pending' && $task['attempts'] < $task['max_attempts']) {
                     $tasks[] = $task;
                 }
@@ -104,20 +105,20 @@ class BackgroundTaskManager
                 // 忽略损坏的任务文件
                 continue;
             }
-            
+
             if (count($tasks) >= $limit) {
                 break;
             }
         }
-        
+
         // 按优先级排序
-        usort($tasks, function($a, $b) {
+        usort($tasks, function ($a, $b) {
             return $a['priority'] <=> $b['priority'];
         });
-        
+
         return $tasks;
     }
-    
+
     /**
      * 执行任务
      * @param array $task 任务数据
@@ -127,21 +128,21 @@ class BackgroundTaskManager
     public function executeTask($task, PinyinConverter $converter)
     {
         $taskFile = $this->config['task_dir'] . $task['id'] . '.json';
-        
+
         try {
             // 更新任务状态为执行中
             $task['status'] = 'running';
             $task['started_at'] = time();
             $task['attempts']++;
             write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
+
             // 执行任务
             $success = $this->executeTaskByType($task, $converter);
-            
+
             // 更新任务状态
             $task['status'] = $success ? 'completed' : 'failed';
             $task['completed_at'] = time();
-            
+
             if ($success) {
                 // 删除已完成的任务文件
                 delete_file($taskFile);
@@ -149,27 +150,26 @@ class BackgroundTaskManager
                 // 保存失败的任务状态
                 write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             }
-            
+
             return $success;
-            
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 执行任务失败: " . $e->getMessage());
-            
+
             // 更新任务状态为失败
             $task['status'] = 'failed';
             $task['completed_at'] = time();
             $task['error'] = $e->getMessage();
-            
+
             try {
                 write_to_file($taskFile, json_encode($task, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             } catch (\Exception $writeError) {
                 // 忽略写入错误
             }
-            
+
             return false;
         }
     }
-    
+
     /**
      * 根据任务类型执行具体任务
      * @param array $task 任务数据
@@ -181,16 +181,16 @@ class BackgroundTaskManager
         switch ($task['type']) {
             case 'not_found_resolve':
                 return $this->resolveNotFoundChar($task['data'], $converter);
-                
+
             case 'self_learn_merge':
                 return $this->executeSelfLearnMerge($task['data'], $converter);
-                
+
             default:
                 error_log("[BackgroundTaskManager] 未知任务类型: " . $task['type']);
                 return false;
         }
     }
-    
+
     /**
      * 处理未找到拼音的字符
      * @param array $data 任务数据
@@ -202,26 +202,26 @@ class BackgroundTaskManager
         if (!isset($data['char'])) {
             return false;
         }
-        
+
         $char = $data['char'];
-        
+
         // 尝试从外部API获取拼音
         $pinyin = $this->fetchPinyinFromExternalSource($char);
-        
+
         if ($pinyin) {
             // 根据字符性质分配到合适的字典
             $this->addCharToAppropriateDict($char, $pinyin, $converter);
-            
+
             // 从未找到字符文件中移除
             $this->removeCharFromNotFound($char);
-            
+
             error_log("[BackgroundTaskManager] 成功为字符 '{$char}' 获取拼音: {$pinyin}");
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * 根据字符性质添加到合适的字典
      * @param string $char 汉字
@@ -232,35 +232,35 @@ class BackgroundTaskManager
     {
         // 判断字符性质
         $charType = $this->classifyCharType($char);
-        
+
         switch ($charType) {
             case 'common':
                 // 常用字 - 添加到常用字典
                 $this->addToCommonDict($char, $pinyin, $converter);
                 break;
-                
+
             case 'rare':
                 // 生僻字 - 添加到生僻字字典
                 $this->addToRareDict($char, $pinyin, $converter);
                 break;
-                
+
             case 'cjk_extended':
                 // CJK扩展字符 - 添加到生僻字字典
                 $this->addToRareDict($char, $pinyin, $converter);
                 break;
-                
+
             case 'user_defined':
                 // 用户自定义字符 - 添加到自定义字典
                 $converter->addCustomPinyin($char, $pinyin);
                 break;
-                
+
             default:
                 // 默认添加到生僻字字典
                 $this->addToRareDict($char, $pinyin, $converter);
                 break;
         }
     }
-    
+
     /**
      * 判断字符类型
      * @param string $char 汉字
@@ -276,21 +276,23 @@ class BackgroundTaskManager
             }
             return 'rare';
         }
-        
+
         // 检查是否为扩展汉字
-        if (PinyinConstants::isInChineseRange($char, 'ext_a') || 
+        if (
+            PinyinConstants::isInChineseRange($char, 'ext_a') ||
             PinyinConstants::isInChineseRange($char, 'ext_b') ||
             PinyinConstants::isInChineseRange($char, 'ext_c') ||
             PinyinConstants::isInChineseRange($char, 'ext_d') ||
             PinyinConstants::isInChineseRange($char, 'ext_e') ||
-            PinyinConstants::isInChineseRange($char, 'compatible')) {
+            PinyinConstants::isInChineseRange($char, 'compatible')
+        ) {
             return 'cjk_extended';
         }
-        
+
         // 其他字符（如用户自定义符号等）
         return 'user_defined';
     }
-    
+
     /**
      * 获取字符的Unicode码点
      * @param string $char 汉字
@@ -301,7 +303,7 @@ class BackgroundTaskManager
         $code = unpack('N', mb_convert_encoding($char, 'UCS-4BE', 'UTF-8'));
         return $code[1] ?? 0;
     }
-    
+
     /**
      * 判断是否为常用汉字
      * @param string $char 汉字
@@ -311,24 +313,23 @@ class BackgroundTaskManager
     {
         // 使用常用字典来判断是否为常用汉字
         $commonDictPath = __DIR__ . '/../data/common_with_tone.php';
-        
+
         if (!is_file_exists($commonDictPath)) {
             return false;
         }
-        
+
         try {
             $commonDict = require_file($commonDictPath);
             $commonDict = is_array($commonDict) ? $commonDict : [];
-            
+
             // 如果字符在常用字典中，则认为是常用汉字
             return isset($commonDict[$char]);
-            
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 加载常用字典失败: " . $e->getMessage());
             return false;
         }
     }
-    
+
     /**
      * 添加到常用字典
      * @param string $char 汉字
@@ -340,7 +341,7 @@ class BackgroundTaskManager
         // 使用PinyinConverter的配置路径
         $this->addToDictFile('common', $char, $pinyin, $converter);
     }
-    
+
     /**
      * 添加到生僻字字典
      * @param string $char 汉字
@@ -352,7 +353,7 @@ class BackgroundTaskManager
         // 添加到生僻字字典
         $this->addToDictFile('rare', $char, $pinyin, $converter);
     }
-    
+
     /**
      * 添加到字典文件
      * @param string $dictType 字典类型
@@ -373,11 +374,11 @@ class BackgroundTaskManager
                 'no_tone' => __DIR__ . '/../data/rare_no_tone.php'
             ]
         ];
-        
+
         if (!isset($dictFiles[$dictType])) {
             return;
         }
-        
+
         foreach ($dictFiles[$dictType] as $toneType => $filePath) {
             if (!is_file_exists($filePath)) {
                 // 如果文件不存在，尝试创建空字典文件
@@ -388,19 +389,19 @@ class BackgroundTaskManager
                     continue;
                 }
             }
-            
+
             try {
                 $dictData = require_file($filePath);
                 $dictData = is_array($dictData) ? $dictData : [];
-                
+
                 // 如果字符已存在，跳过
                 if (isset($dictData[$char])) {
                     continue;
                 }
-                
+
                 // 添加字符到字典
                 $dictData[$char] = $toneType === 'with_tone' ? $pinyin : $this->removeToneFromPinyin($pinyin);
-                
+
                 // 使用全局函数的紧凑数组导出方法保持格式一致
                 if (method_exists($converter, 'pinyin_compact_array_export')) {
                     $exportContent = pinyin_compact_array_export($dictData);
@@ -408,18 +409,17 @@ class BackgroundTaskManager
                     // 如果PinyinConverter的方法不可用，使用兼容的紧凑格式
                     $exportContent = $this->compatibleShortArrayExport($dictData);
                 }
-                
+
                 // 保存字典文件，保持与PinyinConverter一致的格式
                 write_to_file($filePath, "<?php\nreturn " . $exportContent . ";\n");
-                
+
                 error_log("[BackgroundTaskManager] 字符 '{$char}' 已添加到 {$dictType} 字典 ({$toneType})");
-                
             } catch (\Exception $e) {
                 error_log("[BackgroundTaskManager] 添加到字典失败: " . $e->getMessage());
             }
         }
     }
-    
+
     /**
      * 兼容的紧凑数组序列化（用于字典文件）
      * 保持与PinyinConverter一致的格式
@@ -442,7 +442,7 @@ class BackgroundTaskManager
         return remove_tone($pinyin);
         return remove_tone($pinyin);
     }
-    
+
     /**
      * 执行自学习字典合并
      * @param array $data 任务数据
@@ -466,7 +466,7 @@ class BackgroundTaskManager
             return false;
         }
     }
-    
+
     /**
      * 从外部源获取拼音
      * @param string $char 汉字
@@ -479,11 +479,11 @@ class BackgroundTaskManager
         if ($pinyin) {
             return $pinyin;
         }
-        
+
         // 2. 如果官方字典中找不到，再调用外部API获取
         return $this->fetchFromExternalAPI($char);
     }
-    
+
     /**
      * 从Unihan权威字典中获取拼音
      * @param string $char 汉字
@@ -492,19 +492,19 @@ class BackgroundTaskManager
     private function fetchFromUnihanDict(string $char): ?string
     {
         $unihanDictPath = __DIR__ . '/../data/unihan/all_unihan_pinyin.php';
-        
+
         if (!is_file_exists($unihanDictPath)) {
             return null;
         }
-        
+
         try {
             $unihanDict = require_file($unihanDictPath);
             $unihanDict = is_array($unihanDict) ? $unihanDict : [];
-            
+
             // 在Unihan字典中查找字符
             if (isset($unihanDict[$char])) {
                 $pinyinData = $unihanDict[$char];
-                
+
                 // 返回第一个拼音（通常是最常用的）
                 if (is_array($pinyinData) && !empty($pinyinData)) {
                     return $pinyinData[0];
@@ -512,15 +512,14 @@ class BackgroundTaskManager
                     return $pinyinData;
                 }
             }
-            
+
             return null;
-            
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 加载Unihan字典失败: " . $e->getMessage());
             return null;
         }
     }
-    
+
     /**
      * 从外部API获取拼音
      * @param string $char 汉字
@@ -531,10 +530,10 @@ class BackgroundTaskManager
         try {
             // 使用项目中已有的 AutoPinyinFetcher 类
             $fetcher = new AutoPinyinFetcher();
-            
+
             // 按照用户指定的调用顺序：先尝试 getPinyinFromDictAPI，如果失败则尝试 getPinyinFromZdic
             $result = $fetcher->getPinyinFromDictAPI($char) ?? $fetcher->getPinyinFromZdic($char);
-            
+
             if ($result && isset($result['pinyin'])) {
                 // 处理拼音结果，如果是数组则取第一个
                 $pinyin = $result['pinyin'];
@@ -543,15 +542,14 @@ class BackgroundTaskManager
                 }
                 return $pinyin;
             }
-            
+
             return null;
-            
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 调用外部API获取拼音失败: " . $e->getMessage());
             return null;
         }
     }
-    
+
     /**
      * 从未找到字符文件中移除字符
      * @param string $char 字符
@@ -559,31 +557,30 @@ class BackgroundTaskManager
     private function removeCharFromNotFound($char)
     {
         $notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
-        
+
         if (!is_file_exists($notFoundPath)) {
             return;
         }
-        
+
         try {
             $notFoundChars = require_file($notFoundPath);
             $notFoundChars = is_array($notFoundChars) ? $notFoundChars : [];
-            
+
             // 移除字符
-            $notFoundChars = array_filter($notFoundChars, function($c) use ($char) {
+            $notFoundChars = array_filter($notFoundChars, function ($c) use ($char) {
                 return $c !== $char;
             });
-            
+
             // 重新索引数组
             $notFoundChars = array_values($notFoundChars);
-            
+
             // 保存文件
             write_to_file($notFoundPath, "<?php\nreturn " . var_export($notFoundChars, true) . ";\n");
-            
         } catch (\Exception $e) {
             error_log("[BackgroundTaskManager] 从未找到字符文件移除字符失败: " . $e->getMessage());
         }
     }
-    
+
     /**
      * 批量处理任务
      * @param PinyinConverter $converter 拼音转换器实例
@@ -597,28 +594,28 @@ class BackgroundTaskManager
             'succeeded' => 0,
             'failed' => 0
         ];
-        
+
         $tasks = $this->getPendingTasks($batchSize);
-        
+
         foreach ($tasks as $task) {
             $success = $this->executeTask($task, $converter);
-            
+
             $results['processed']++;
             if ($success) {
                 $results['succeeded']++;
             } else {
                 $results['failed']++;
             }
-            
+
             // 限制并发数
             if ($results['processed'] >= $this->config['max_concurrent']) {
                 break;
             }
         }
-        
+
         return $results;
     }
-    
+
     /**
      * 获取任务统计信息
      * @return array 统计信息
@@ -632,18 +629,18 @@ class BackgroundTaskManager
             'completed' => 0,
             'failed' => 0
         ];
-        
+
         if (!is_file_exists($this->config['task_dir'])) {
             return $stats;
         }
-        
+
         $files = glob($this->config['task_dir'] . '*.json');
-        
+
         foreach ($files as $file) {
             try {
                 $content = read_file_data($file);
                 $task = json_decode($content, true);
-                
+
                 if ($task) {
                     $stats['total']++;
                     $stats[$task['status']]++;
@@ -653,7 +650,7 @@ class BackgroundTaskManager
                 continue;
             }
         }
-        
+
         return $stats;
     }
 }
