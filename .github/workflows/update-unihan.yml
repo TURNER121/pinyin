@@ -155,7 +155,19 @@ jobs:
         cd release_artifacts
         zip -r unihan_dicts.zip unihan_dicts/
         echo "✅ 字典文件打包完成"
-        
+    
+    - name: 计算文件数量并设置环境变量
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      run: |
+        # 计算包含的文件数量
+        ARTIFACT_FILES=$(find release_artifacts -type f | wc -l)
+        # 计算字典文件数量
+        DICT_FILES=$(find data/unihan -name '*.php' | wc -l)
+        # 设置为环境变量
+        echo "ARTIFACT_FILES=$ARTIFACT_FILES" >> $GITHUB_ENV
+        echo "DICT_FILES=$DICT_FILES" >> $GITHUB_ENV
+        echo "包含文件数: $ARTIFACT_FILES, 字典文件数: $DICT_FILES"
+    
     - name: 创建发布版本
       if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
       id: create_release
@@ -166,10 +178,10 @@ jobs:
         tag_name: unihan-${{ env.RELEASE_VERSION }}
         release_name: Unihan数据库更新 ${{ env.RELEASE_VERSION }}
         body: |
-          ## Unihan数据库自动更新
-          - 更新时间: ${{ env.TIMESTAMP }}
-          - 包含文件: $(find release_artifacts -type f | wc -l) 个文件
-          - 字典文件数: $(find data/unihan -name '*.php' | wc -l) 个
+          Unihan数据库自动更新 
+          更新时间: ${{ env.TIMESTAMP }} 
+          包含文件: ${{ env.ARTIFACT_FILES }} 个文件 
+          字典文件数: ${{ env.DICT_FILES }} 个
         draft: false
         prerelease: false
         
