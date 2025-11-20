@@ -1,0 +1,10 @@
+!.gitignore
+!.gitkeep
+# OS files
+.DS_Store
+Thumbs.db
+
+# ignore
+Unihan/
+Unihan.zip
+
