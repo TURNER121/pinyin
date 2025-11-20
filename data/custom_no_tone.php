@@ -1,6 +1,6 @@
 <?php
 return [
-    '互联网' => ['hu lian wang'],
+        '互联网' => ['hu lian wang'],
     '计算机' => ['ji suan ji'],
     '服务器' => ['fu wu qi'],
     '客户端' => ['ke hu duan'],
@@ -97,5 +97,5 @@ return [
     '共识机制' => ['gong shi ji zhi'],
     '挖矿' => ['wa kuang'],
     '李四' => ['li si'],
-    '云南' => ['yun nan'],
+    '云南' => ['yun nan']
 ];
