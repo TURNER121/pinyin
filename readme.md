@@ -238,6 +238,9 @@ $pinyinConverter = new PinyinConverter($config);
 
 ```
 
+注意: prod分支不包含 测试用例 代码 和 unicode 数据管理工具 和 tools 目录
+
+
 ### 测试类型说明
 
 该测试脚本包含以下测试类型：
