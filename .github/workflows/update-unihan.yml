@@ -21,6 +21,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
         
     - name: 设置PHP环境
       uses: shivammathur/setup-php@v2
@@ -67,6 +68,18 @@ jobs:
         php unicode/extract_unihan.php --extract
         
         echo "Unihan数据更新完成"
+        
+    - name: 保存原始Unihan.zip文件
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      run: |
+        echo "保存原始Unihan.zip文件..."
+        mkdir -p release_artifacts
+        if [ -f "unicode/Unihan.zip" ]; then
+          cp unicode/Unihan.zip release_artifacts/
+          echo "✅ 原始文件已保存"
+        else
+          echo "❌ 未找到Unihan.zip文件"
+        fi
         
     - name: 清理临时文件
       if: always()
@@ -122,6 +135,55 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
+    - name: 打包Unihan字典文件
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      run: |
+        echo "打包Unihan字典文件..."
+        mkdir -p release_artifacts/unihan_dicts
+        cp data/unihan/*.php release_artifacts/unihan_dicts/
+        cd release_artifacts
+        zip -r unihan_dicts.zip unihan_dicts/
+        echo "✅ 字典文件打包完成"
+        
+    - name: 创建发布版本
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: unihan-${{ github.run_id }}-${{ github.run_attempt }}
+        release_name: Unihan数据库更新 ${{ env.RELEASE_VERSION || format('{0}', now()) }}
+        body: |
+          ## Unihan数据库自动更新
+          - 更新时间: ${{ env.TIMESTAMP || format('{0}', now()) }}
+          - 包含文件: $(find release_artifacts -type f | wc -l) 个文件
+          - 字典文件数: $(find data/unihan -name '*.php' | wc -l) 个
+        draft: false
+        prerelease: false
+        
+    - name: 上传Unihan.zip附件
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release_artifacts/Unihan.zip
+        asset_name: Unihan.zip
+        asset_content_type: application/zip
+        
+    - name: 上传字典文件包附件
+      if: steps.check_update.outputs.age_days >= 7 || github.event.inputs.force_update == 'true'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release_artifacts/unihan_dicts.zip
+        asset_name: unihan_dicts.zip
+        asset_content_type: application/zip
+        
     - name: 更新结果通知
       if: always()
       run: |
@@ -129,6 +191,9 @@ jobs:
           echo "✅ Unihan数据库更新完成"
           echo "📊 更新时间: $(date)"
           echo "📁 生成文件: $(find data/unihan/ -name '*.php' 2>/dev/null | wc -l) 个"
+          if [ "${{ steps.create_release.outputs.id }}" != "" ]; then
+            echo "🚀 发布版本: https://github.com/${{ github.repository }}/releases/tag/unihan-${{ github.run_id }}-${{ github.run_attempt }}"
+          fi
         else
           echo "ℹ️ 数据库较新，无需更新"
           echo "📊 数据年龄: ${{ steps.check_update.outputs.age_days }} 天"
