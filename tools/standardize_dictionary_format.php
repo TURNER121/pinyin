@@ -22,7 +22,7 @@ class DictionaryFormatStandardizer
      */
     private function getDictionaryFiles()
     {
-        $dataDir = __DIR__ . '/../data';
+        $dataDir = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
         $patterns = [
             'custom_*.php',
             'self_*.php', 

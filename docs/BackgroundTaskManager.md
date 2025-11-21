@@ -53,7 +53,7 @@ $taskManager = new BackgroundTaskManager($config);
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `enable` | bool | `true` | 是否启用后台任务处理 |
-| `task_dir` | string | `../data/backup/tasks/` | 任务文件存储目录 |
+| `task_dir` | string | `tasks/` | 任务文件存储目录（相对于字典根路径） |
 | `max_concurrent` | int | `3` | 最大并发任务数 |
 | `task_types` | array | `[]` | 自定义任务类型配置 |
 

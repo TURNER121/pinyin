@@ -73,7 +73,7 @@ function formatFile($filePath)
 }
 
 // 获取目标文件
-$dataDir = __DIR__ . '/../data';
+$dataDir = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
 $patterns = ['custom_*.php', 'self_*.php', 'rare_*.php'];
 $files = [];
 

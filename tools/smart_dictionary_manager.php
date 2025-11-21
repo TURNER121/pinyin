@@ -11,8 +11,9 @@ class SmartDictionaryManager
     
     public function __construct()
     {
-        $this->dataDir = __DIR__ . '/../data';
-        $this->backupDir = __DIR__ . '/../data/backup';
+        $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
+        $this->dataDir = $dictRootPath;
+        $this->backupDir = $dictRootPath . '/backup';
         $this->ensureBackupDir();
     }
     

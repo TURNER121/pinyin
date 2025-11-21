@@ -22,7 +22,8 @@
             ],
             "env": {
                 "XDEBUG_MODE": "debug,develop",
-                "XDEBUG_CONFIG": "client_port=${port}"
+                "XDEBUG_CONFIG": "client_port=${port}",
+                "PINYIN_SKIP_AUTO_DEPLOY":"1"
             }
         },
         {

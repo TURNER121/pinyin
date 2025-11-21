@@ -25,16 +25,22 @@ class BackgroundTaskManager
     {
         $this->config = array_merge([
             'enable' => true,
-            'task_dir' => __DIR__ . '/../data/backup/tasks/',
+            'task_dir' => 'tasks/', // 任务存储目录（相对于字典根路径）
             'max_concurrent' => 3,
-            'task_types' => []
+            'task_types' => [],
+            'dict_root_path' => getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data' // 字典根路径
         ], $config);
+
+        // 解析任务目录的完整路径
+        $this->config['task_dir'] = get_dict_path($this->config['task_dir']);
 
         // 确保任务目录存在
         if (!is_file_exists($this->config['task_dir'])) {
             create_dir($this->config['task_dir']);
         }
     }
+
+
 
     /**
      * 创建后台任务
@@ -307,7 +313,7 @@ class BackgroundTaskManager
     private function isCommonHanChar($char)
     {
         // 使用常用字典来判断是否为常用汉字
-        $commonDictPath = __DIR__ . '/../data/common_with_tone.php';
+        $commonDictPath = get_dict_path('common_with_tone.php');
 
         if (!is_file_exists($commonDictPath)) {
             return false;
@@ -361,12 +367,12 @@ class BackgroundTaskManager
         // 使用默认字典文件路径（与PinyinConverter保持一致）
         $dictFiles = [
             'common' => [
-                'with_tone' => __DIR__ . '/../data/common_with_tone.php',
-                'no_tone' => __DIR__ . '/../data/common_no_tone.php'
+                'with_tone' => 'common_with_tone.php',
+                'no_tone' => 'common_no_tone.php'
             ],
             'rare' => [
-                'with_tone' => __DIR__ . '/../data/rare_with_tone.php',
-                'no_tone' => __DIR__ . '/../data/rare_no_tone.php'
+                'with_tone' => 'rare_with_tone.php',
+                'no_tone' => 'rare_no_tone.php'
             ]
         ];
 
@@ -375,10 +381,12 @@ class BackgroundTaskManager
         }
 
         foreach ($dictFiles[$dictType] as $toneType => $filePath) {
-            if (!is_file_exists($filePath)) {
+            $fullPath = get_dict_path($filePath);
+            
+            if (!is_file_exists($fullPath)) {
                 // 如果文件不存在，尝试创建空字典文件
                 try {
-                    write_to_file($filePath, "<?php\nreturn [];\n");
+                    write_to_file($fullPath, "<?php\nreturn [];\n");
                 } catch (\Exception $e) {
                     error_log("[BackgroundTaskManager] 创建字典文件失败: " . $e->getMessage());
                     continue;
@@ -386,7 +394,7 @@ class BackgroundTaskManager
             }
 
             try {
-                $dictData = require_file($filePath);
+                $dictData = require_file($fullPath);
                 $dictData = is_array($dictData) ? $dictData : [];
 
                 // 如果字符已存在，跳过
@@ -406,7 +414,7 @@ class BackgroundTaskManager
                 }
 
                 // 保存字典文件，保持与PinyinConverter一致的格式
-                write_to_file($filePath, "<?php\nreturn " . $exportContent . ";\n");
+                write_to_file($fullPath, "<?php\nreturn " . $exportContent . ";\n");
 
                 error_log("[BackgroundTaskManager] 字符 '{$char}' 已添加到 {$dictType} 字典 ({$toneType})");
             } catch (\Exception $e) {
@@ -485,7 +493,7 @@ class BackgroundTaskManager
      */
     private function fetchFromUnihanDict(string $char): ?string
     {
-        $unihanDictPath = __DIR__ . '/../data/unihan/all_unihan_pinyin.php';
+        $unihanDictPath = get_dict_path('unihan/all_unihan_pinyin.php');
 
         if (!is_file_exists($unihanDictPath)) {
             return null;
@@ -550,7 +558,7 @@ class BackgroundTaskManager
      */
     private function removeCharFromNotFound($char)
     {
-        $notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
+        $notFoundPath = get_dict_path('diy/not_found_chars.php');
 
         if (!is_file_exists($notFoundPath)) {
             return;

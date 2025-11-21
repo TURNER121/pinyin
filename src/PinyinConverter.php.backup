@@ -225,13 +225,36 @@ class PinyinConverter implements ConverterInterface
         'no_tone' => []
     ];
     /**
-     * 兜底字基础拼音映射
+     * 常用字基础拼音映射（兜底）
      *
      * @var array
      */
-    private $basicPinyinMap = [ 
-        '你' => ['nǐ', 'ni'], '好' => ['hǎo', 'hao'], 
-        '拼' => ['pīn', 'pin'], '音' => ['yīn', 'yin']
+    private $basicPinyinMap = [
+        '开' => ['kāi', 'kai'],
+        '发' => ['fā', 'fa'],
+        '云' => ['yún', 'yun'],
+        '南' => ['nán', 'nan'],
+        '系' => ['xì', 'xi'],
+        '务' => ['wù', 'wu'],
+        '技' => ['jì', 'ji'],
+        '术' => ['shù', 'shu'],
+        '栈' => ['zhàn', 'zhan'],
+        '含' => ['hán', 'han'],
+        '源' => ['yuán', 'yuan'],
+        '码' => ['mǎ', 'ma'],
+        '部' => ['bù', 'bu'],
+        '署' => ['shǔ', 'shu'],
+        '文' => ['wén', 'wen'],
+        '档' => ['dàng', 'dang'],
+        '企' => ['qǐ', 'qi'],
+        '业' => ['yè', 'ye'],
+        '级' => ['jí', 'ji'],
+        '客' => ['kè', 'ke'],
+        '户' => ['hù', 'hu'],
+        '服' => ['fú', 'fu'],
+        '软' => ['ruǎn', 'ruan'],
+        '件' => ['jiàn', 'jian'],
+        '统' => ['tǒng', 'tong']
     ];
     /**
      * 构造函数
@@ -257,6 +280,42 @@ class PinyinConverter implements ConverterInterface
         $this->loadLastMergeTime();
         $this->checkMergeNeed();
     }
+
+
+    
+        $envConfig = [];
+        
+        // 字典根路径配置
+        $dictRootPath = getenv(PinyinConstants::ENV_DICT_ROOT_PATH);
+        if ($dictRootPath && is_dir($dictRootPath)) {
+            $envConfig['dict_root_path'] = rtrim($dictRootPath, '/\\');
+        }
+        
+        // 字典加载策略
+        $strategy = getenv(PinyinConstants::ENV_DICT_STRATEGY) ?: PinyinConstants::DICT_STRATEGY_BOTH;
+        if (in_array($strategy, [
+            PinyinConstants::DICT_STRATEGY_BOTH,
+            PinyinConstants::DICT_STRATEGY_WITH_TONE,
+            PinyinConstants::DICT_STRATEGY_NO_TONE
+        ])) {
+            $envConfig['dict_loading']['strategy'] = $strategy;
+        }
+        
+        // 缓存大小配置
+        $cacheSize = getenv(PinyinConstants::ENV_DICT_CACHE_SIZE);
+        if ($cacheSize && is_numeric($cacheSize)) {
+            $envConfig['high_freq_cache']['size'] = (int)$cacheSize;
+        }
+        
+        // 懒加载配置
+        $lazyLoading = getenv(PinyinConstants::ENV_LAZY_LOADING);
+        if ($lazyLoading !== false) {
+            $envConfig['dict_loading']['lazy_loading'] = !in_array(strtolower($lazyLoading), ['false', '0', 'no']);
+        }
+        
+        return $envConfig;
+    }
+
     /**
      * 初始化目录结构
      */
@@ -443,7 +502,8 @@ class PinyinConverter implements ConverterInterface
     private function isTestingEnvironment(): bool
     {
         return defined('PHPUNIT_RUNNING') ||
-               getenv('APP_ENV') === 'testing';
+               getenv('APP_ENV') === 'testing' ||
+               getenv('PHP_ENV') === 'testing';
     }
     /**
      * 获取上次迁移时间

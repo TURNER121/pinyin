@@ -26,14 +26,17 @@ try {
     $diagnostics['errors']['autoload'] = $e->getMessage();
 }
 
+// 定义字典根路径（支持环境变量）
+$dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/data';
+
 // 定义正确的字典路径
 $dictPaths = [
-    'common_with_tone' => __DIR__ . '/data/common_with_tone.php',
-    'common_no_tone' => __DIR__ . '/data/common_no_tone.php',
-    'custom_with_tone' => __DIR__ . '/data/custom_with_tone.php',
-    'custom_no_tone' => __DIR__ . '/data/custom_no_tone.php',
-    'rare_with_tone' => __DIR__ . '/data/rare_with_tone.php',
-    'rare_no_tone' => __DIR__ . '/data/rare_no_tone.php'
+    'common_with_tone' => $dictRootPath . '/common_with_tone.php',
+    'common_no_tone' => $dictRootPath . '/common_no_tone.php',
+    'custom_with_tone' => $dictRootPath . '/custom_with_tone.php',
+    'custom_no_tone' => $dictRootPath . '/custom_no_tone.php',
+    'rare_with_tone' => $dictRootPath . '/rare_with_tone.php',
+    'rare_no_tone' => $dictRootPath . '/rare_no_tone.php'
 ];
 
 // 检查字典文件是否存在

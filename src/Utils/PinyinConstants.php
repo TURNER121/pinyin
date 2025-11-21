@@ -48,6 +48,31 @@ class PinyinConstants
     /**
      * 完整的汉字 Unicode 范围（包含所有扩展区）
      */
+
+    // ==================== 字典加载策略常量 ====================
+
+    /**
+     * 同时加载带声调和无声调字典（默认，兼容性最好）
+     */
+    public const DICT_STRATEGY_BOTH = 'both';
+
+    /**
+     * 仅加载带声调字典，无声调转换时实时去除声调（节省内存）
+     */
+    public const DICT_STRATEGY_WITH_TONE = 'with_tone';
+
+    /**
+     * 仅加载无声调字典，适用于不需要声调的场景（最节省内存）
+     */
+    public const DICT_STRATEGY_NO_TONE = 'no_tone';
+
+    /**
+     * 环境变量名称
+     */
+    public const ENV_DICT_STRATEGY = 'PINYIN_DICT_STRATEGY';
+    public const ENV_DICT_CACHE_SIZE = 'PINYIN_DICT_CACHE_SIZE';
+    public const ENV_LAZY_LOADING = 'PINYIN_LAZY_LOADING';
+    public const ENV_DICT_ROOT_PATH = 'PINYIN_DICT_ROOT_PATH';
     public const FULL_CHINESE_RANGE = '\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{20000}-\x{2A6DF}\x{2A700}-\x{2B73F}\x{2B740}-\x{2B81F}\x{2B820}-\x{2CEAF}\x{F900}-\x{FAFF}\x{2F800}-\x{2FA1F}';
 
     /**

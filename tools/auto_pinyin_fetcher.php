@@ -11,7 +11,8 @@ if (php_sapi_name() === 'cli' && isset($argv[0]) && basename($argv[0]) === 'auto
     require_once __DIR__ . '/../vendor/autoload.php';
     
     // 加载未找到的字符
-    $notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
+    $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
+    $notFoundPath = $dictRootPath . '/diy/not_found_chars.php';
     echo "检查文件: {$notFoundPath}\n";
     
     if (file_exists($notFoundPath)) {
@@ -57,7 +58,7 @@ if (php_sapi_name() === 'cli' && isset($argv[0]) && basename($argv[0]) === 'auto
         
         // 生成待确认字典（不覆盖当前自定义字典）
         if ($successCount > 0) {
-            $pendingDictPath = __DIR__ . '/../data/diy/pending_confirm_with_tone.php';
+            $pendingDictPath = $dictRootPath . '/diy/pending_confirm_with_tone.php';
             AutoPinyinFetcher::generateCustomDict($results, $pendingDictPath, true);
             echo "待确认字典已生成: {$pendingDictPath}\n";
             echo "注意：获取的拼音已保存到待确认字典中，请人工确认后再合并到自定义字典\n";

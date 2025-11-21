@@ -7,7 +7,8 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 // 加载未找到的字符
-$notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
+$dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
+$notFoundPath = $dictRootPath . '/diy/not_found_chars.php';
 if (!file_exists($notFoundPath)) {
     echo "未找到字符文件不存在\n";
     exit(1);

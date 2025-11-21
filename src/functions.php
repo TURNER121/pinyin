@@ -107,16 +107,6 @@ if (!function_exists('pinyin_debug')) {
         }
     }
 }
-if (!function_exists('is_debug_enabled')) {
-    /**
-     * 检查是否启用调试模式
-     * @return bool
-     */
-    function is_debug_enabled()
-    {
-        return getenv('APP_DEBUG') === 'true';
-    }
-}
 if (!function_exists('log_file')) {
     /**
      * 记录调试日志到文件
@@ -125,7 +115,7 @@ if (!function_exists('log_file')) {
      */
     function log_file($message, $logFile = null)
     {
-        if (is_debug_enabled()) {
+        if (is_debug_mode()) {
             $timestamp = date('Y-m-d H:i:s');
             $logMessage = "[{$timestamp}] {$message}\n";
             if ($logFile && is_writable(dirname($logFile))) {
@@ -252,8 +242,8 @@ if (!function_exists('copy_dict')) {
      */
     function copy_dict(string $dst): bool
     {
-        // 获取项目根目录下的data目录路径
-        $dataDir = dirname(dirname(__DIR__)) . '/data/';
+        // 获取字典根路径（支持环境变量）
+        $dataDir = getenv('PINYIN_DICT_ROOT_PATH') ?: dirname(dirname(__DIR__)) . '/data/';
         // 安全检查：确保源路径确实是data目录并可以访问
         $realDataDir = realpath($dataDir);
         if ($realDataDir === false) {
@@ -289,10 +279,8 @@ if (!function_exists('copy_dict')) {
                     return false;
                 }
             } else {
-                // 如果是文件，直接复制
-                if (!@copy($sourcePath, $destinationPath)) {
-                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
-                }
+                // 如果是文件，调用 copy_file 函数复制
+                copy_file($sourcePath, $destinationPath);
             }
         }
         return true;
@@ -329,10 +317,8 @@ if (!function_exists('copy_directory')) {
                     return false;
                 }
             } else {
-                // 如果是文件，直接复制
-                if (!@copy($sourcePath, $destinationPath)) {
-                    throw new PinyinException("Failed to copy file: {$sourcePath} to {$destinationPath}", PinyinException::ERROR_FILE_NOT_FOUND);
-                }
+                // 如果是文件，调用 copy_file 函数复制
+                copy_file($sourcePath, $destinationPath);
             }
         }
         return true;
@@ -1204,5 +1190,263 @@ if (!function_exists('pinyin_trim')) {
     function pinyin_trim($str, $sep = ' ')
     {
         return trim($str, " \n\r\t\v\0" . $sep);
+    }
+}
+if (!function_exists('get_dict_path')) {
+    /**
+     * 获取字典文件的完整路径
+     * 
+     * @param string $relativePath 相对于字典根目录的路径
+     * @return string 完整路径
+     */
+    function get_dict_path(string $relativePath): string
+    {
+        // 获取字典根路径（支持环境变量）
+        $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
+        return $dictRootPath . '/' . ltrim($relativePath, '/\\');
+    }
+}
+
+if (!function_exists('load_environment_config')) {
+    /**
+     * 从环境变量和 .env 文件加载配置
+     * 
+     * 特性：
+     * - 支持静态缓存，避免重复加载
+     * - 自动检测项目根目录
+     * - 支持多种环境变量前缀
+     * 
+     * 优先级说明：
+     * 1. 系统环境变量优先级最高
+     * 2. .env 文件中的配置次之
+     * 3. 默认配置优先级最低
+     * 
+     * @param string $projectRoot 项目根目录，用于查找 .env 文件
+     * @param bool $forceReload 是否强制重新加载（忽略缓存）
+     * @return array 环境配置数组
+     */
+    function load_environment_config(string $projectRoot = '', bool $forceReload = false): array
+    {
+        // 静态缓存，避免重复加载
+        static $cachedConfig = null;
+        static $loadedProjectRoot = null;
+        
+        // 如果有缓存且不强制重新加载，直接返回缓存
+        if (!$forceReload && $cachedConfig !== null && $loadedProjectRoot === $projectRoot) {
+            return $cachedConfig;
+        }
+        
+        $envConfig = [];
+        
+        // 如果未提供项目根目录，尝试自动检测
+        if (empty($projectRoot)) {
+            // 从当前文件位置向上查找项目根目录（包含 composer.json 的目录）
+            $currentDir = __DIR__;
+            while ($currentDir !== '/' && !is_file($currentDir . '/composer.json')) {
+                $currentDir = dirname($currentDir);
+            }
+            $projectRoot = $currentDir !== '/' ? $currentDir : dirname(__DIR__);
+        }
+        
+        // 加载 .env 文件（如果存在）
+        $envFile = $projectRoot . '/.env';
+        if (is_file($envFile)) {
+            $envVars = parse_env_file($envFile);
+            
+            // 支持的环境变量前缀
+            $supportedPrefixes = ['PINYIN_', 'APP_', 'CI', 'COMPOSER_', 'PHP_'];
+            
+            foreach ($envVars as $key => $value) {
+                $shouldLoad = false;
+                
+                // 检查是否匹配支持的前缀
+                foreach ($supportedPrefixes as $prefix) {
+                    if (strpos($key, $prefix) === 0) {
+                        $shouldLoad = true;
+                        break;
+                    }
+                }
+                
+                // 特殊处理一些常用变量
+                if (!$shouldLoad && in_array($key, ['CI', 'COMPOSER_PROD_INSTALL'])) {
+                    $shouldLoad = true;
+                }
+                
+                if ($shouldLoad) {
+                    // 只有当系统环境变量不存在时才使用 .env 文件的值
+                    if (getenv($key) === false) {
+                        putenv("{$key}={$value}");
+                        $_ENV[$key] = $value;
+                    }
+                }
+            }
+        }
+        
+        // PINYIN 相关配置
+        $dictRootPath = getenv(PinyinConstants::ENV_DICT_ROOT_PATH);
+        if ($dictRootPath && is_dir($dictRootPath)) {
+            $envConfig['dict_root_path'] = rtrim($dictRootPath, '/\\');
+        }
+        
+        $strategy = getenv(PinyinConstants::ENV_DICT_STRATEGY) ?: PinyinConstants::DICT_STRATEGY_BOTH;
+        if (in_array($strategy, [
+            PinyinConstants::DICT_STRATEGY_BOTH,
+            PinyinConstants::DICT_STRATEGY_WITH_TONE,
+            PinyinConstants::DICT_STRATEGY_NO_TONE
+        ])) {
+            $envConfig['dict_loading']['strategy'] = $strategy;
+        }
+        
+        $cacheSize = getenv(PinyinConstants::ENV_DICT_CACHE_SIZE);
+        if ($cacheSize && is_numeric($cacheSize)) {
+            $envConfig['high_freq_cache']['size'] = (int)$cacheSize;
+        }
+        
+        $lazyLoading = getenv(PinyinConstants::ENV_LAZY_LOADING);
+        if ($lazyLoading !== false) {
+            $envConfig['dict_loading']['lazy_loading'] = !in_array(strtolower($lazyLoading), ['false', '0', 'no']);
+        }
+        
+        // 应用环境配置
+        $envConfig['app'] = [
+            'debug' => getenv('APP_DEBUG') !== false,
+            'env' => getenv('APP_ENV') ?: 'production',
+            'ci' => getenv('CI') !== false,
+            'composer_prod_install' => getenv('COMPOSER_PROD_INSTALL') !== false
+        ];
+        
+        // 部署相关配置
+        $envConfig['deployment'] = [
+            'skip_auto_deploy' => getenv('PINYIN_SKIP_AUTO_DEPLOY') !== false,
+            'cn2num' => getenv('PINYIN_CN2NUM') !== false
+        ];
+        
+        // 缓存配置
+        $cachedConfig = $envConfig;
+        $loadedProjectRoot = $projectRoot;
+        
+        return $envConfig;
+    }
+}
+
+if (!function_exists('parse_env_file')) {
+    /**
+     * 解析 .env 文件
+     * 
+     * @param string $envFile .env 文件路径
+     * @return array 解析后的环境变量数组
+     */
+    function parse_env_file(string $envFile): array
+    {
+        $envVars = [];
+        
+        if (!is_file($envFile)) {
+            return $envVars;
+        }
+        
+        $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        
+        foreach ($lines as $line) {
+            // 跳过注释和空行
+            if (empty($line) || strpos(trim($line), '#') === 0) {
+                continue;
+            }
+            
+            // 解析键值对
+            if (strpos($line, '=') !== false) {
+                list($key, $value) = explode('=', $line, 2);
+                $key = trim($key);
+                $value = trim($value);
+                
+                // 移除引号
+                if ((substr($value, 0, 1) === '"' && substr($value, -1) === '"') ||
+                    (substr($value, 0, 1) === "'" && substr($value, -1) === "'")) {
+                    $value = substr($value, 1, -1);
+                }
+                
+                $envVars[$key] = $value;
+            }
+        }
+        
+        return $envVars;
+    }
+}
+
+if (!function_exists('get_env_var')) {
+    /**
+     * 获取环境变量值，支持 .env 文件和默认值
+     * 
+     * @param string $key 环境变量名
+     * @param mixed $default 默认值
+     * @param string $projectRoot 项目根目录
+     * @return mixed 环境变量值或默认值
+     */
+    function get_env_var(string $key, $default = null, string $projectRoot = '')
+    {
+        // 确保环境配置已加载
+        load_environment_config($projectRoot);
+        
+        $value = getenv($key);
+        
+        if ($value === false) {
+            return $default;
+        }
+        
+        // 处理布尔值
+        if (is_bool($default)) {
+            return !in_array(strtolower($value), ['false', '0', 'no', 'off', '']);
+        }
+        
+        // 处理数字
+        if (is_numeric($value)) {
+            return is_int($default) ? (int)$value : (float)$value;
+        }
+        
+        return $value;
+    }
+}
+
+if (!function_exists('is_debug_mode')) {
+    /**
+     * 检查是否为调试模式
+     * 
+     * @param string $projectRoot 项目根目录
+     * @return bool 是否为调试模式
+     */
+    function is_debug_mode(string $projectRoot = ''): bool
+    {
+        return get_env_var('APP_DEBUG', false, $projectRoot);
+    }
+}
+
+if (!function_exists('is_production_env')) {
+    /**
+     * 检查是否为生产环境
+     * 
+     * @param string $projectRoot 项目根目录
+     * @return bool 是否为生产环境
+     */
+    function is_production_env(string $projectRoot = ''): bool
+    {
+        $env = get_env_var('APP_ENV', 'production', $projectRoot);
+        $ci = get_env_var('CI', false, $projectRoot);
+        $composerProd = get_env_var('COMPOSER_PROD_INSTALL', false, $projectRoot);
+        
+        return $env === 'production' || $ci || $composerProd;
+    }
+}
+
+if (!function_exists('is_testing_env')) {
+    /**
+     * 检查是否为测试环境
+     * 
+     * @param string $projectRoot 项目根目录
+     * @return bool 是否为测试环境
+     */
+    function is_testing_env(string $projectRoot = ''): bool
+    {
+        $appEnv = get_env_var('APP_ENV', 'production', $projectRoot);
+        
+        return $appEnv === 'testing';
     }
 }

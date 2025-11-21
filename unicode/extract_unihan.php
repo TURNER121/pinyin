@@ -48,11 +48,12 @@ if (isset($options['h']) || isset($options['help']) || empty($options)) {
 
 try {
     // 配置参数
+    $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
     $config = [
         'remote_url' => 'https://unicode.org/Public/UCD/latest/ucd/Unihan.zip',
         'zip_file' => __DIR__ . '/Unihan.zip',
         'extract_dir' => __DIR__ . '/temp_unihan',
-        'output_dir' => __DIR__ . '/../data/unihan',
+        'output_dir' => $dictRootPath . '/unihan',
         'cache_days' => 30,
         'max_retries' => 3,
         'timeout' => 300

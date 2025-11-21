@@ -172,7 +172,8 @@ if (php_sapi_name() === 'cli' && isset($argv[0]) && basename($argv[0]) === 'piny
     require_once __DIR__ . '/../vendor/autoload.php';
     
     // 加载未找到的字符
-    $notFoundPath = __DIR__ . '/../data/diy/not_found_chars.php';
+    $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
+    $notFoundPath = $dictRootPath . '/diy/not_found_chars.php';
     if (!file_exists($notFoundPath)) {
         echo "未找到字符文件不存在: {$notFoundPath}\n";
         exit(1);
@@ -200,7 +201,7 @@ if (php_sapi_name() === 'cli' && isset($argv[0]) && basename($argv[0]) === 'piny
     }
     
     // 保存结果
-    $outputFile = __DIR__ . '/../data/diy/pinyin_resolve_results.php';
+    $outputFile = $dictRootPath . '/diy/pinyin_resolve_results.php';
     file_put_contents($outputFile, "<?php\nreturn " . var_export($results, true) . ";\n");
     echo "\n结果已保存到: {$outputFile}\n";
     

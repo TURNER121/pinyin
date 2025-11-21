@@ -47,8 +47,8 @@ class UnihanDataManager
             'timeout' => self::DOWNLOAD_TIMEOUT,
             'zip_file' => __DIR__ . '/Unihan.zip',
             'extract_dir' => __DIR__ . '/temp_unihan',
-            'output_dir' => dirname(__DIR__) . '/data/unihan',
-            'dict_dir' => dirname(__DIR__) . '/data'
+            'output_dir' => (getenv('PINYIN_DICT_ROOT_PATH') ?: dirname(__DIR__) . '/data') . '/unihan',
+            'dict_dir' => getenv('PINYIN_DICT_ROOT_PATH') ?: dirname(__DIR__) . '/data'
         ], $config);
     }
     

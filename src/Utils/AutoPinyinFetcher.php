@@ -219,9 +219,12 @@ class AutoPinyinFetcher
      */
     public static function getPinyinFromLocalDict($char)
     {
+        // 获取字典根路径（支持环境变量）
+        $dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../../data';
+        
         $dictFiles = [
-            __DIR__ . '/../../data/custom_with_tone.php', // 自定义数据库
-            __DIR__ . '/../../data/unihan/all_unihan_pinyin.php' // unihan 数据库
+            $dictRootPath . '/custom_with_tone.php', // 自定义数据库
+            $dictRootPath . '/unihan/all_unihan_pinyin.php' // unihan 数据库
         ];
 
         foreach ($dictFiles as $dictFile) {

@@ -44,7 +44,25 @@
     "test": "phpunit",
     "check-style": "phpcs src tests",
     "fix-style": "phpcbf src tests",
-    "phpstan": "phpstan analyse src --level=5"
+    "phpstan": "phpstan analyse src --level=5",
+    "post-install-cmd": [
+      "@php scripts/deploy-dictionaries.php"
+    ],
+    "post-update-cmd": [
+      "@php scripts/deploy-dictionaries.php"
+    ],
+    "deploy-dicts": [
+      "@php scripts/deploy-dictionaries.php"
+    ],
+    "deploy-dicts-silent": [
+      "@php scripts/deploy-dictionaries-silent.php"
+    ],
+    "deploy-dicts-force": [
+      "@php scripts/deploy-dictionaries-silent.php --strategy=overwrite"
+    ],
+    "deploy-dicts-to": [
+      "@php scripts/deploy-dictionaries-silent.php --target="
+    ]
   },
   "minimum-stability": "stable",
   "prefer-stable": true

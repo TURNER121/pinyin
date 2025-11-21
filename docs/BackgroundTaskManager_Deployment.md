@@ -113,7 +113,7 @@ sudo systemctl start pinyin-high-priority
 // 在 PinyinConverter 配置中优化
 'background_tasks' => [
     'enable' => true,
-    'task_dir' => __DIR__.'/../data/backup/tasks/',
+    'task_dir' => 'tasks/', // 相对于字典根路径
     'max_concurrent' => 5, // 根据服务器配置调整
     'task_types' => [
         'not_found_resolve' => [
@@ -137,7 +137,7 @@ sudo systemctl start pinyin-high-priority
 
 'background_tasks' => [
     'enable' => true,
-    'task_dir' => __DIR__.'/../data/backup/tasks/',
+    'task_dir' => 'tasks/', // 相对于字典根路径
     'max_concurrent' => 3,
     'retry_delay' => 60, // 失败重试延迟（秒）
     'max_retries' => 3   // 最大重试次数
@@ -210,8 +210,8 @@ exit(0);
 **解决方案**：
 ```bash
 # 检查任务目录权限
-chmod 755 /path/to/pinyin/data/backup/tasks/
-chown www-data:www-data /path/to/pinyin/data/backup/tasks/
+chmod 755 /path/to/pinyin/data/tasks/
+chown www-data:www-data /path/to/pinyin/data/tasks/
 
 # 检查磁盘空间
 df -h /path/to/pinyin/

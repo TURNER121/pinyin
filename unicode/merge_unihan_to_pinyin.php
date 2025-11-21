@@ -4,11 +4,12 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use tekintian\pinyin\unicode\UnihanDataManager;
 
 // 配置参数
+$dictRootPath = getenv('PINYIN_DICT_ROOT_PATH') ?: __DIR__ . '/../data';
 $config = [
     'zip_file' => __DIR__ . '/Unihan/Unihan.zip',
     'extract_dir' => __DIR__ . '/Unihan/extracted',
-    'output_dir' => __DIR__ . '/../data/unihan',
-    'dict_dir' => __DIR__ . '/../data'
+    'output_dir' => $dictRootPath . '/unihan',
+    'dict_dir' => $dictRootPath
 ];
 
 // 创建数据管理器
